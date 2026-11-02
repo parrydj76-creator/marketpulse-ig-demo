@@ -1,1 +1,271 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MarketPulse AI V3.2</title><style>body{background:#0b1220;color:#edf2ff;font:15px system-ui;margin:0}main{max-width:1050px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}h1{font-size:28px}.muted{color:#9fb0ce}.pill{border:1px solid #3c5277;border-radius:25px;padding:8px 12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.card{background:#16233a;border:1px solid #30415f;border-radius:16px;padding:18px;margin:14px 0}button{background:#4f80f5;color:white;border:0;border-radius:10px;padding:12px 16px;margin:4px;cursor:pointer}button.alt{background:#38465f}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #35445e}section{overflow:auto}.warn{color:#ffd37a}small{color:#aab9d4}</style></head><body><main><header><div><h1>MarketPulse AI <span class="pill">V3.2 DEMO</span></h1><p class="muted">IG intraday dashboard • 5-minute candles</p></div><span class="pill" id="connection">Loading…</span></header><div class="card"><strong class="warn">Demo execution is locked by default</strong><p>V3.2 can submit DEMO-only orders only after explicit Render configuration and an authenticated dashboard enable action. Do not arm until you have verified the contract sizing and dealing rules. Pause prevents new entries but does not close positions.</p><button id="toggle" onclick="toggle()">Enable demo auto-trading</button><button class="alt" onclick="scan()">Scan now</button><button class="alt" onclick="test()">Test IG connection</button></div><div class="grid"><div class="card"><small>Account balance (IG demo)</small><h2 id="balance">—</h2></div><div class="card"><small>Risk setting</small><h2>0.5% / trade</h2></div><div class="card"><small>Max daily loss setting</small><h2>2%</h2><small>Not enforced in dry-run; balance-based protection is not an equity loss guarantee</small></div><div class="card"><small>Last scan</small><h2 id="last">—</h2></div></div><section class="card"><h2>Historical data status</h2><p id="history">Waiting for status…</p><small>403 allowance errors trigger a 24-hour local cooldown by default. IG controls when its allowance actually resets. Restarts reset this in-memory cooldown.</small></section><section class="card"><h2>Market signals</h2><table><thead><tr><th>EPIC</th><th>Signal</th><th>Score*</th><th>Entry</th><th>Stop</th><th>Target</th></tr></thead><tbody id="signals"></tbody></table><p><small>*Heuristic score, not a win probability.</small></p></section><section class="card"><h2>Open IG demo positions</h2><pre id="positions" style="white-space:pre-wrap;overflow-wrap:anywhere">—</pre></section><section class="card"><h2>Activity</h2><div id="activity"></div></section></main><script>let state={};const f=x=>typeof x==='number'?x.toFixed(5):'—';async function call(url,opts){opts=opts||{};if(opts.method==='POST'){let token=sessionStorage.getItem('marketpulse_admin_token');if(!token){token=prompt('Enter ADMIN_TOKEN from Render Environment (not your IG password)');if(token)sessionStorage.setItem('marketpulse_admin_token',token)}opts.headers={...(opts.headers||{}),'X-Admin-Token':token||''}}const r=await fetch(url,opts);const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}async function refresh(){try{state=await call('/api/state');document.getElementById('connection').textContent='DEMO • '+(state.auto?'AUTO ORDERS ARMED':state.orderExecutionEnabled?'AUTO ORDERS PAUSED':'ORDERS LOCKED');document.getElementById('toggle').textContent=state.auto?'Pause auto-trading':'Enable demo auto-trading';document.getElementById('balance').textContent=state.balance==null?'—':state.balance.toLocaleString();document.getElementById('last').textContent=state.lastScan?new Date(state.lastScan).toLocaleTimeString():'—';document.getElementById('history').textContent=Object.entries(state.history||{}).map(([epic,v])=>epic+': '+v.status+(v.retryAt?' • local retry after '+new Date(v.retryAt).toLocaleString():'')+' • cached candles '+v.candles).join(' | ')||'No market data request yet';document.getElementById('signals').innerHTML=(state.signals||[]).map(x=>`<tr><td>${esc(x.epic)}</td><td>${esc(x.direction)}</td><td>${x.score||0}</td><td>${f(x.entry)}</td><td>${f(x.stop)}</td><td>${f(x.target)}</td></tr>`).join('')||'<tr><td colspan="6">Waiting for first scan…</td></tr>';document.getElementById('positions').textContent=JSON.stringify(state.positions||[],null,2);document.getElementById('activity').innerHTML=(state.activity||[]).slice(0,20).map(x=>`<p><small>${esc(x.time)}</small> ${esc(x.message)}</p>`).join('')||'No activity yet'}catch(e){document.getElementById('connection').textContent=e.message}}function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}async function toggle(){try{await call('/api/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!state.auto})});refresh()}catch(e){alert(e.message)}}async function scan(){try{await call('/api/scan',{method:'POST'});refresh()}catch(e){alert(e.message)}}async function test(){try{const d=await call('/api/ig/test');alert('IG DEMO connected: '+d.accountsReturned+' account(s). No orders placed.')}catch(e){alert(e.message)}}refresh();setInterval(refresh,10000)</script></body></html>
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1120">
+<title>MarketPulse AI V3.3</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1120;color:#e9f0ff;font:15px -apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+main{max-width:1100px;margin:auto;padding:20px 14px 70px}
+h1{font-size:30px;margin:8px 0}
+h2{font-size:21px}
+small,.muted{color:#a6b4cd}
+.card{background:#19263d;border:1px solid #354869;border-radius:18px;padding:20px;margin-top:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
+.cards .card{margin:0}
+.metric{font-size:27px;font-weight:700;margin-top:10px}
+.tag{display:inline-block;border:1px solid #536a93;border-radius:30px;padding:7px 12px}
+.green{color:#72e4af}
+.yellow{color:#ffd276}
+.red{color:#ff9696}
+button{background:#557af0;color:white;border:0;border-radius:10px;padding:12px 16px;margin:5px 5px 5px 0;font:inherit}
+input,select{background:#101a2c;color:white;border:1px solid #435776;border-radius:9px;padding:10px;margin:5px}
+.scroll{overflow-x:auto}
+table{width:100%;min-width:720px;border-collapse:collapse}
+td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #344762}
+th{color:#aabbd5;font-size:12px}
+td{white-space:nowrap}
+.event{padding:10px 0;border-bottom:1px solid #344762;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<main>
+<small>MARKETPULSE AI</small>
+<h1>V3.3 <span class="tag">LIVE FOREX · DEMO</span></h1>
+<p class="muted">IG live prices · 5-minute candles · Multi-currency monitoring</p>
+
+<section class="card">
+<strong class="yellow">🔒 Demo orders locked</strong>
+<p>Live market monitoring and experimental trading signals only. No CFD orders can be placed by this version.</p>
+<p>Signals require at least 30 completed five-minute candles. Without initial historical data, warm-up takes at least 150 minutes.</p>
+<button onclick="testIG()">Test IG connection</button>
+<button onclick="reconnect()">Reconnect live feed</button>
+<p id="error" class="red"></p>
+</section>
+
+<div class="cards">
+<div class="card">
+<small>IG demo balance</small>
+<div class="metric" id="balance">—</div>
+<small id="currency"></small>
+</div>
+<div class="card">
+<small>Forex markets discovered</small>
+<div class="metric" id="discovered">—</div>
+</div>
+<div class="card">
+<small>Receiving live prices</small>
+<div class="metric" id="receiving">—</div>
+</div>
+<div class="card">
+<small>Live stream status</small>
+<div class="metric" id="status">Connecting</div>
+</div>
+</div>
+
+<section class="card">
+<h2>Live currency CFD scanner</h2>
+<input id="search" placeholder="Search EUR, GBP, USD…" oninput="render()">
+<select id="filter" onchange="render()">
+<option value="ALL">All currencies</option>
+<option value="LIVE">Live prices</option>
+<option value="LONG">LONG</option>
+<option value="SHORT">SHORT</option>
+<option value="WAIT">WAIT</option>
+<option value="WARMING">Warming</option>
+<option value="STALE">Stale</option>
+</select>
+
+<div class="scroll">
+<table>
+<thead>
+<tr>
+<th>Currency CFD</th>
+<th>Bid</th>
+<th>Ask</th>
+<th>Spread</th>
+<th>Signal</th>
+<th>Score</th>
+<th>Candles</th>
+<th>Age</th>
+</tr>
+</thead>
+<tbody id="markets">
+<tr><td>Waiting for live data…</td></tr>
+</tbody>
+</table>
+</div>
+<p class="muted">Signals are experimental indicators, not predictions or probabilities of success.</p>
+</section>
+
+<section class="card">
+<h2>Open IG demo positions</h2>
+<pre id="positions">Loading…</pre>
+</section>
+
+<section class="card">
+<h2>Bot activity</h2>
+<div id="activity">Waiting for events…</div>
+</section>
+
+<p class="muted">MarketPulse AI V3.3 · DEMO monitoring only · No order execution</p>
+</main>
+
+<script>
+let state = {};
+const el = id => document.getElementById(id);
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    '"':'&quot;',
+    "'":'&#39;'
+  }[c]));
+}
+
+function price(value, digits = 5) {
+  return typeof value === 'number'
+    ? value.toFixed(digits)
+    : '—';
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    ...options
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Request failed');
+  }
+
+  return data;
+}
+
+async function testIG() {
+  try {
+    const result = await api('/api/ig/test');
+    alert(
+      'IG DEMO connected. Accounts: ' +
+      result.accountsReturned +
+      '. No orders placed.'
+    );
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function reconnect() {
+  let token = prompt('Enter ADMIN_TOKEN from Render');
+
+  if (!token) return;
+
+  try {
+    await api('/api/admin/reconnect', {
+      method: 'POST',
+      headers: { 'X-Admin-Token': token }
+    });
+
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function render() {
+  const s = state;
+
+  el('balance').textContent =
+    s.account?.balance == null
+      ? '—'
+      : Number(s.account.balance).toLocaleString(
+          undefined,
+          { maximumFractionDigits: 2 }
+        );
+
+  el('currency').textContent = s.account?.currency || '';
+  el('discovered').textContent = s.marketCount ?? '—';
+
+  const all = s.markets || [];
+
+  el('receiving').textContent =
+    all.filter(x =>
+      x.ageSeconds != null && x.ageSeconds < 20
+    ).length + ' / ' + (s.marketCount ?? 0);
+
+  el('status').textContent = s.streamStatus || 'Unknown';
+  el('error').textContent = s.streamError || '';
+
+  const query = el('search').value.toLowerCase();
+  const filter = el('filter').value;
+
+  const rows = all.filter(x =>
+    (x.epic + ' ' + x.name).toLowerCase().includes(query)
+  ).filter(x =>
+    filter === 'ALL' ||
+    (filter === 'LIVE'
+      ? x.ageSeconds != null && x.ageSeconds < 20
+      : x.direction === filter)
+  );
+
+  el('markets').innerHTML = rows.map(x => `
+    <tr>
+      <td>
+        ${escapeHTML(x.name)}
+        <br>
+        <small>${escapeHTML(x.epic)}</small>
+      </td>
+      <td>${price(x.bid)}</td>
+      <td>${price(x.ask)}</td>
+      <td>${price(x.spread, 6)}</td>
+      <td class="${
+        x.direction === 'LONG' ? 'green' :
+        x.direction === 'SHORT' ? 'red' : 'yellow'
+      }">${escapeHTML(x.direction)}</td>
+      <td>${x.score || 0}</td>
+      <td>${x.bars || 0}/30</td>
+      <td>${
+        x.ageSeconds == null
+          ? '—'
+          : x.ageSeconds + 's'
+      }</td>
+    </tr>
+  `).join('') || '<tr><td colspan="8">No matching markets</td></tr>';
+
+  const positions = s.positions || [];
+
+  el('positions').textContent = positions.length
+    ? JSON.stringify(positions, null, 2)
+    : 'No open demo positions';
+
+  el('activity').innerHTML = (s.activity || [])
+    .slice(0, 20)
+    .map(x => `
+      <div class="event">
+        <small>${escapeHTML(x.time)}</small>
+        <div>${escapeHTML(x.message)}</div>
+      </div>
+    `).join('') || 'No events yet';
+}
+
+async function refresh() {
+  try {
+    state = await api('/api/state');
+    render();
+  } catch (error) {
+    el('error').textContent = error.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
