@@ -1,21 +1,14 @@
-
 services:
   - type: web
-    name: marketpulse-ig-demo
+    name: marketpulse-ig-demo-v33
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: IG_ACCOUNT_TYPE
         value: DEMO
-      - key: AUTO_DISCOVER_FOREX
-        value: "true"
-      - key: MAX_STREAM_MARKETS
-        value: "20"
       - key: IG_API_KEY
         sync: false
       - key: IG_USERNAME
