@@ -2,7 +2,7 @@
 // V6.0 multi-market IG DEMO engine. Broker orders remain fail-closed without a
 // durable execution journal; environment variables persist configuration only.
 const fs=require('fs'),path=require('path');
-const EPICS={}; // Dynamic IG discovery; no hardcoded pair allowlist.
+const MAJOR_PAIRS=new Set(['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD']);
 const num=(v,def=NaN)=>v===undefined||v===''?def:Number(v);
 function createMultiEngine(ctx){
  const {api,quotes,candles,analyse,accountReady,brokerEnabled,storageAllowed,storageHealthy,brokerReady,legacyBusy,log,confirmDeal,host,authInfo,discoveredMarkets}=ctx;
@@ -11,7 +11,7 @@ function createMultiEngine(ctx){
  function refreshMarkets(){
   for(const [epic] of discoveredMarkets){
    const match=/^CS\.D\.([A-Z]{6})\.CFD\.IP$/.exec(epic);
-   if(!match)continue;
+   if(!match||!MAJOR_PAIRS.has(match[1]))continue;
    const key=match[1];if(configs[key])continue;
    const enabled=env[`MP_${key}_ENABLED`]==='true';
    configs[key]={key,epic,enabled,size:num(env[`MP_${key}_SIZE`]),stopDistance:num(env[`MP_${key}_STOP_POINTS`]),limitDistance:num(env[`MP_${key}_LIMIT_POINTS`]),maxSpread:num(env[`MP_${key}_MAX_SPREAD_PRICE`]),minScore:num(env[`MP_${key}_MIN_SCORE`],70),minSizeVerified:num(env[`MP_${key}_VERIFIED_MIN_SIZE`]),unitsVerified:env[`MP_${key}_POINT_UNITS_VERIFIED`]==='true',lifecycleVerified:env[`MP_${key}_LIFECYCLE_VERIFIED`]==='true',currencyCode:env[`MP_${key}_CURRENCY_CODE`]||''};
@@ -34,11 +34,11 @@ function createMultiEngine(ctx){
  // A restart cannot safely reconstruct today's completed orders from an ephemeral local file.
  // Never claim broker reconciliation proves the daily trade cap after an ephemeral reset.
  function ledgerReady(){return persistent&&state.ledgerHealthy&&state.ledgerRestored&&!state.pending}
- function status(){const keys=refreshMarkets();return {version:'6.1.0',demoOnly:true,autoResumeRequested:auto,armed:state.armed,haltReason:state.haltReason,brokerEnabled:brokerEnabled(),brokerReconciled:brokerReady(),journal:{persistent,restored:state.ledgerRestored,healthy:state.ledgerHealthy,pending:state.pending,brokerHistoryVerified:state.brokerHistoryVerified,automaticResumeSafe:ledgerReady()},global:{dailyCap:globalCap,dailyOpens:state.dailyOpens,maxOpen,tracked:state.positions},discoveredCount:keys.length,streamCapacity:Number(env.MAX_STREAM_MARKETS||20),markets:keys.map(k=>{const c=configs[k],q=quotes.get(c.epic),s=analyse(c.epic);return {key:k,epic:c.epic,enabled:c.enabled,configuration:{size:c.size,stopDistance:c.stopDistance,limitDistance:c.limitDistance,maxSpread:c.maxSpread,minScore:c.minScore},validationErrors:configErrors(c),lifecycleVerified:c.lifecycleVerified,streamReady:streamReady(c),bars:s.bars||0,direction:s.direction,score:s.score,quoteSource:q?.source||null,ruleCheck:state.validatedRules[k]||null}}),events:state.events.slice(0,15),lastError:state.lastError}}
+ function status(){const keys=refreshMarkets();return {version:'6.2.0',demoOnly:true,autoResumeRequested:auto,armed:state.armed,haltReason:state.haltReason,brokerEnabled:brokerEnabled(),brokerReconciled:brokerReady(),journal:{persistent,restored:state.ledgerRestored,healthy:state.ledgerHealthy,pending:state.pending,brokerHistoryVerified:state.brokerHistoryVerified,automaticResumeSafe:ledgerReady()},global:{dailyCap:globalCap,dailyOpens:state.dailyOpens,maxOpen,tracked:state.positions},discoveredCount:keys.length,streamCapacity:Math.min(7,Number(env.MAX_STREAM_MARKETS||7)),markets:keys.map(k=>{const c=configs[k],q=quotes.get(c.epic),s=analyse(c.epic);return {key:k,epic:c.epic,enabled:c.enabled,configuration:{size:c.size,stopDistance:c.stopDistance,limitDistance:c.limitDistance,maxSpread:c.maxSpread,minScore:c.minScore},validationErrors:configErrors(c),lifecycleVerified:c.lifecycleVerified,streamReady:streamReady(c),bars:s.bars||0,direction:s.direction,score:s.score,quoteSource:q?.source||null,ruleCheck:state.validatedRules[k]||null}}),events:state.events.slice(0,15),lastError:state.lastError}}
  async function reconcile(){const all=await positions();if(state.pending){halt('Unresolved order journal; inspect IG before retrying');return all}for(const [id,p] of Object.entries(state.positions)){const found=all.find(x=>x.dealId===id);if(!found){state.operatorStop=true;halt('Previously tracked deal missing: '+id);return all}if(!Number.isFinite(found.stopLevel)||!Number.isFinite(found.limitLevel)){state.operatorStop=true;halt('Attached broker protection unverified for '+id);return all}}
  // Unrecognized positions require manual review, never silently adopt ownership.
  if(all.some(x=>!state.positions[x.dealId]))halt('Untracked broker position detected; inspect IG before resuming');return all}
- async function place(c,direction){if(state.pending)throw Error('Pending order unresolved');const payload={currencyCode:c.currencyCode,direction,epic:c.epic,expiry:'-',forceOpen:true,guaranteedStop:false,orderType:'MARKET',size:c.size,stopDistance:c.stopDistance,limitDistance:c.limitDistance};
+ async function place(c,direction){if(!MAJOR_PAIRS.has(c.key))throw Error('Pair not approved for demo execution');if(state.pending)throw Error('Pending order unresolved');const payload={currencyCode:c.currencyCode,direction,epic:c.epic,expiry:'-',forceOpen:true,guaranteedStop:false,orderType:'MARKET',size:c.size,stopDistance:c.stopDistance,limitDistance:c.limitDistance};
  state.pending={kind:'OPEN',epic:c.epic,at:new Date().toISOString(),direction};save();if(!state.ledgerHealthy)throw Error('Cannot journal order');
  // POST is intentionally sent once. Network failure leaves pending journal and halts.
  const response=await api('/positions/otc','POST',payload,'2');const conf=await confirmDeal(response.dealReference);if(conf.dealStatus!=='ACCEPTED'||!conf.dealId)throw Error('IG order unconfirmed');const all=await positions();const pos=all.find(x=>x.dealId===conf.dealId);if(!pos||!Number.isFinite(pos.stopLevel)||!Number.isFinite(pos.limitLevel))throw Error('Accepted order: broker stop/limit not verified. Manual review required');state.positions[conf.dealId]={epic:c.epic,direction,size:c.size,openedAt:new Date().toISOString()};state.dailyOpens++;state.pending=null;record('OPEN_CONFIRMED',{epic:c.epic,dealId:conf.dealId,direction});return conf}

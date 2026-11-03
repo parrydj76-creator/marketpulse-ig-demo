@@ -6,16 +6,23 @@ const {PaperEngine}=require('./paper-engine');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
 const HOST='https://demo-api.ig.com/gateway/deal';
-const FIVE=300000, MAX=Math.min(40,Math.max(1,Number(process.env.MAX_STREAM_MARKETS)||20));
+// Fixed allowlist: no IG market search calls at startup.
+const MAJOR_FOREX = Object.freeze([
+ ['EURUSD','EUR/USD'],['GBPUSD','GBP/USD'],['USDJPY','USD/JPY'],
+ ['USDCHF','USD/CHF'],['USDCAD','USD/CAD'],['AUDUSD','AUD/USD'],['NZDUSD','NZD/USD']
+].map(([pair,name])=>({epic:`CS.D.${pair}.CFD.IP`,name})));
+const MAJOR_EPICS=new Set(MAJOR_FOREX.map(x=>x.epic));
+
+const FIVE=300000, MAX=Math.min(7,Math.max(1,Number(process.env.MAX_STREAM_MARKETS)||7));
 const MAX_DISCOVERY_NODES=Math.min(100,Math.max(1,Number(process.env.DISCOVERY_NODE_LIMIT)||45));
 const MAX_DISCOVERY_MARKETS=Math.min(500,Math.max(1,Number(process.env.DISCOVERY_MARKET_LIMIT)||150));
-const configEpics=String(process.env.IG_EPICS||'').split(',').map(x=>x.trim()).filter(x=>/^CS\.D\.[A-Z]{6}\.(?:CFD|MINI)\.IP$/.test(x));
+const configEpics=MAJOR_FOREX.map(x=>x.epic); // IG_EPICS cannot override the major-pair allowlist
 const MULTI_MODE=process.env.MP_MULTI_MODE==='true';
 const TEST_ONE=MULTI_MODE?false:process.env.TEST_ONE_FOREX!=='false';
-const PROBE_MINI=process.env.PROBE_EURUSD_MINI!=='false';
+const PROBE_MINI=false; // No MINI instruments in major-only mode
 const PROBE_ACCOUNT=process.env.PROBE_ACCOUNT_STREAM!=='false';
-const REST_POLL_SECONDS=Math.min(300,Math.max(60,Number(process.env.REST_POLL_SECONDS)||60));
-const REST_MAX_MARKETS=Math.min(5,Math.max(1,Number(process.env.REST_MAX_MARKETS)||3));
+const REST_POLL_SECONDS=Math.min(600,Math.max(120,Number(process.env.REST_POLL_SECONDS)||300));
+const REST_MAX_MARKETS=Math.min(2,Math.max(1,Number(process.env.REST_MAX_MARKETS)||1));
 const REST_STALE_MS=REST_POLL_SECONDS*2500;
 // Explicit operator opt-in: defaults to monitor-only even when a user arms the UI.
 const BROKER_DEMO_EXECUTION=process.env.ENABLE_IG_DEMO_ORDERS==='true' && process.env.IG_ACCOUNT_TYPE==='DEMO';
@@ -25,6 +32,7 @@ const VERIFIED_MIN_SIZE=Number(process.env.IG_VERIFIED_MIN_SIZE||0); // Must be 
 const VERIFIED_STOP_UNITS=process.env.IG_VERIFIED_STOP_UNITS==='true';
 // V4.0: hard DEMO-only, armed only via authenticated admin endpoint; never auto-arm on boot.
 const TRADE_EPIC=process.env.TRADE_EPIC||'CS.D.EURUSD.CFD.IP';
+if(!MAJOR_EPICS.has(TRADE_EPIC))throw Error('TRADE_EPIC must be an approved major forex CFD');
 let TRADE_SIZE=Number(process.env.DEMO_TRADE_SIZE||0);
 let TRADE_STOP_DISTANCE=Number(process.env.DEMO_STOP_DISTANCE||0);
 let TRADE_LIMIT_DISTANCE=Number(process.env.DEMO_LIMIT_DISTANCE||0);
@@ -86,39 +94,17 @@ async function login(){if(!process.env.IG_API_KEY||!process.env.IG_USERNAME||!pr
 async function api(url,method='GET',body=null,version='1'){
  if(!auth)await login();try{return (await request(url,method,body,version)).data}catch(e){if(method==='GET' && /401|client-token-invalid|security-token-invalid/i.test(e.message)){await login();return (await request(url,method,body,version)).data}throw e}
 }
-function isForex(m){
- const epic=String(m.epic||'').trim();
- const name=String(m.instrumentName||m.name||'').trim();
- return /^CS\.D\.[A-Z]{6}\.(CFD|MINI)\.IP$/.test(epic) &&
-   (/^[A-Z]{3}\/[A-Z]{3}(?:\s+Mini)?$/i.test(name) || /^CS\.D\.[A-Z]{6}\./.test(epic));
-}
+function isForex(m){return MAJOR_EPICS.has(String(m?.epic||'').trim())}
 function addMarket(m){
  if(!isForex(m))return;
  const epic=String(m.epic).trim();
- markets.set(epic,{epic,name:String(m.instrumentName||m.name||epic).slice(0,100),streaming:false});
+ markets.set(epic,{epic,name:MAJOR_FOREX.find(x=>x.epic===epic).name,streaming:false});
 }
 async function discover(){
  lastDiscovery=new Date().toISOString();discoverError='';
- const selected=new Map();
- const currencies=['USD','EUR','GBP','JPY','CHF','AUD','NZD','CAD','SEK','NOK','DKK','SGD','HKD','ZAR','MXN','TRY','PLN','CZK','HUF','CNH'];
- const terms=[...new Set([...currencies.map(c=>c+'/USD'),...currencies.map(c=>'EUR/'+c),...currencies.map(c=>'GBP/'+c),...currencies.map(c=>'USD/'+c),...currencies.map(c=>'JPY/'+c)])].filter(t=>t.slice(0,3)!==t.slice(4));
- let successful=0;
- if(process.env.AUTO_DISCOVER_FOREX!=='false'){
-  for(const term of terms){
-   try{
-    const result=await api('/markets?searchTerm='+encodeURIComponent(term));successful++;
-    for(const m of result.markets||[]){
-     if(isForex(m))selected.set(m.epic,m);
-     if(selected.size>=MAX_DISCOVERY_MARKETS)break;
-    }
-   }catch(e){log('Market search '+term+': '+e.message)}
-   if(selected.size>=MAX_DISCOVERY_MARKETS)break;
-  }
-  if(!successful)discoverError='All IG market searches failed';
- }
- for(const epic of configEpics)if(!selected.has(epic))selected.set(epic,{epic,name:epic});
- markets.clear();for(const m of selected.values())addMarket(m);
- log(`Forex-only discovery: ${markets.size} CFDs; test-one=${TEST_ONE}`);
+ markets.clear();
+ for(const market of MAJOR_FOREX)addMarket(market);
+ log(`Major forex allowlist loaded: ${markets.size} CFD pairs; zero market search requests`);
  return markets.size;
 }
 
@@ -154,7 +140,7 @@ function startStream(){
  ls.connectionDetails.setPassword(`CST-${auth.cst}|XST-${auth.xst}`);
  const ordered=[...markets.keys()].sort((a,b)=>Number(b==='CS.D.EURUSD.CFD.IP')-Number(a==='CS.D.EURUSD.CFD.IP'));
  const epics=MULTI_MODE?ordered.filter(x=>/\.CFD\.IP$/.test(x)).sort((a,b)=>Number(process.env['MP_'+b.split('.')[2]+'_ENABLED']==='true')-Number(process.env['MP_'+a.split('.')[2]+'_ENABLED']==='true')).slice(0,MAX):ordered.slice(0,TEST_ONE?1:MAX);
- if(!epics.length)throw Error('No forex markets discovered');
+ if(!epics.length)throw Error('No approved major forex markets configured');
  // Two independent diagnostic subscriptions on EUR/USD CFD: standard IG price fields
  // IG PRICE adapter supports BIDPRICE1/ASKPRICE1, DLG_FLAG and DELAY.
  // A single subscription per EPIC avoids competing field schemas.
@@ -351,11 +337,11 @@ async function tradingCycle(){if(trade.pendingOrder)return;if(!BROKER_DEMO_EXECU
 
 async function init(){if(starting)return;starting=true;brokerReconciled=false;disarm('Reconnect requires re-arming');try{closeStream();await login();await discover();await refreshAccount();const brokerPositions=await reconcilePositions();brokerReconciled=true;if(brokerPositions.length||trade.tracked)log('Broker reconciliation: '+brokerPositions.length+' open position(s), bot tracked='+Boolean(trade.tracked));await checkRestSnapshot();startStream();startRestPolling()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});if(req.get('X-Admin-Token')!==token)return res.status(403).json({error:'Invalid admin token'});next()}
-app.get('/api/paper',(_req,res)=>res.json({version:'6.1.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
+app.get('/api/paper',(_req,res)=>res.json({version:'6.2.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
 app.post('/api/admin/paper/reset',requireAdmin,(req,res)=>{if(req.body?.confirm!=='RESET_PAPER')return res.status(400).json({error:'Confirm RESET_PAPER'});paper.reset();res.json({ok:true,...paper.snapshot()})});
-app.get('/api/health',(req,res)=>res.json({ok:true,version:'6.1.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
+app.get('/api/health',(req,res)=>res.json({ok:true,version:'6.2.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
 app.get('/api/state',(req,res)=>{const now=Date.now(),list=[...markets.values()].map(m=>{const q=quotes.get(m.epic),s=analyse(m.epic);return {...m,...s,streaming:Boolean(q&&now-q.at<(q.source==='REST'?REST_STALE_MS:20000)),bid:q?.bid??null,ask:q?.ask??null,spread:q?.spread??null,marketState:q?.marketState||'UNKNOWN',lastTick:q?new Date(q.at).toISOString():null,ageSeconds:q?Math.round((now-q.at)/1000):null,priceSource:q?.source==='REST'?'REST_POLLING':q?.source||null,igUpdateTime:q?.igUpdateTime||null}});
- res.json({version:'6.1.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',auto:trade.armed,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION,paper:paper.snapshot(),storage:{persistentConfirmed:PERSISTENT_STORAGE,ephemeral:!PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,oracleVm:false,healthy:persistenceHealthy,brokerReconciled,dir:DATA_DIR},orderExecutionEnabled:trade.executionEnabled,executionReadiness:{manualTestQuoteReady:manualDemoQuoteReady(),demoLifecycleVerified:DEMO_EXECUTION_TESTED,brokerEnabled:BROKER_DEMO_EXECUTION,storageConfirmed:PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,persistenceHealthy,brokerReconciled,configValid:tradingConfigValid(),pendingOrder:!!trade.pendingOrder,operatorStop:trade.operatorStop,streamReady:streamTradeReady()},trading:tradePublic(),streamStatus,streamError,lastConnected,account:null,positions:[],lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.priceSource==='STREAM'&&x.lastTick&&x.ageSeconds<20).length,restReceivingCount:list.filter(x=>x.priceSource==='REST_POLLING'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries([...diagnostics].map(([k,v])=>[k,{...v,item:v.item?.replace(/PRICE:[^:]+:/,'PRICE:[REDACTED]:')}])),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'IG DEMO ONLY. Ephemeral mode is best effort; restart can erase trade history and daily caps. Requires verified dealing rules, broker reconciliation, live stream and operator enablement.'})});
+ res.json({version:'6.2.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',auto:trade.armed,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION,paper:paper.snapshot(),storage:{persistentConfirmed:PERSISTENT_STORAGE,ephemeral:!PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,oracleVm:false,healthy:persistenceHealthy,brokerReconciled,dir:DATA_DIR},orderExecutionEnabled:trade.executionEnabled,executionReadiness:{manualTestQuoteReady:manualDemoQuoteReady(),demoLifecycleVerified:DEMO_EXECUTION_TESTED,brokerEnabled:BROKER_DEMO_EXECUTION,storageConfirmed:PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,persistenceHealthy,brokerReconciled,configValid:tradingConfigValid(),pendingOrder:!!trade.pendingOrder,operatorStop:trade.operatorStop,streamReady:streamTradeReady()},trading:tradePublic(),streamStatus,streamError,lastConnected,account:null,positions:[],lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.priceSource==='STREAM'&&x.lastTick&&x.ageSeconds<20).length,restReceivingCount:list.filter(x=>x.priceSource==='REST_POLLING'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries([...diagnostics].map(([k,v])=>[k,{...v,item:v.item?.replace(/PRICE:[^:]+:/,'PRICE:[REDACTED]:')}])),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'IG DEMO ONLY. Ephemeral mode is best effort; restart can erase trade history and daily caps. Requires verified dealing rules, broker reconciliation, live stream and operator enablement.'})});
 app.get('/api/ig/test',requireAdmin,async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/admin/reconnect',requireAdmin,async(req,res)=>{await init();res.json({ok:true,streamStatus,streamError})});
 app.post('/api/admin/refresh',requireAdmin,async(req,res)=>{try{await refreshAccount();res.json({ok:true,account,positions})}catch(e){res.status(502).json({error:e.message})}});
