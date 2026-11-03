@@ -1,6 +1,6 @@
 'use strict';
 require('dotenv').config();
-const express=require('express'), path=require('path');
+const express=require('express'), path=require('path'), fs=require('fs');
 const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
@@ -15,6 +15,24 @@ const PROBE_ACCOUNT=process.env.PROBE_ACCOUNT_STREAM!=='false';
 const REST_POLL_SECONDS=Math.min(300,Math.max(60,Number(process.env.REST_POLL_SECONDS)||60));
 const REST_MAX_MARKETS=Math.min(5,Math.max(1,Number(process.env.REST_MAX_MARKETS)||3));
 const REST_STALE_MS=REST_POLL_SECONDS*2500;
+// V3.9: hard DEMO-only, armed only via authenticated admin endpoint; never auto-arm on boot.
+const TRADE_EPIC=process.env.TRADE_EPIC||'CS.D.EURUSD.CFD.IP';
+const TRADE_SIZE=Number(process.env.DEMO_TRADE_SIZE||0);
+const TRADE_STOP_DISTANCE=Number(process.env.DEMO_STOP_DISTANCE||0);
+const TRADE_LIMIT_DISTANCE=Number(process.env.DEMO_LIMIT_DISTANCE||0);
+const TRADE_MIN_SCORE=Math.max(65,Math.min(90,Number(process.env.DEMO_MIN_SCORE)||70));
+const TRADE_MAX_SPREAD=Number(process.env.DEMO_MAX_SPREAD||0);
+const TRADE_MAX_HOLD_MINUTES=Math.max(15,Math.min(1440,Number(process.env.DEMO_MAX_HOLD_MINUTES)||180));
+const TRADE_COOLDOWN_MINUTES=Math.max(5,Math.min(1440,Number(process.env.DEMO_COOLDOWN_MINUTES)||30));
+const TRADE_DAILY_CAP=Math.max(1,Math.min(3,Number(process.env.DEMO_DAILY_CAP)||2));
+const TRADE_STATE_PATH=process.env.TRADE_STATE_PATH||path.join(__dirname,'marketpulse-v39-state.json');
+const trade={armed:false,executionEnabled:false,busy:false,haltReason:'Disarmed on startup',lastAction:null,lastError:null,tracked:null,lastClosedAt:0,day:new Date().toISOString().slice(0,10),dailyOpens:0,history:[],lastDecision:null};
+function tradingConfigValid(){return /^CS\.D\.[A-Z]{6}\.CFD\.IP$/.test(TRADE_EPIC)&&Number.isFinite(TRADE_SIZE)&&TRADE_SIZE>0&&TRADE_SIZE<=1&&Number.isFinite(TRADE_STOP_DISTANCE)&&TRADE_STOP_DISTANCE>0&&Number.isFinite(TRADE_LIMIT_DISTANCE)&&TRADE_LIMIT_DISTANCE>0&&Number.isFinite(TRADE_MAX_SPREAD)&&TRADE_MAX_SPREAD>0;}
+function tradePublic(){return {armed:trade.armed,executionEnabled:trade.executionEnabled,busy:trade.busy,haltReason:trade.haltReason,lastAction:trade.lastAction,lastError:trade.lastError,tracked:trade.tracked,day:trade.day,dailyOpens:trade.dailyOpens,dailyCap:TRADE_DAILY_CAP,lastDecision:trade.lastDecision,history:trade.history.slice(0,15),config:{epic:TRADE_EPIC,size:TRADE_SIZE,stopDistance:TRADE_STOP_DISTANCE,limitDistance:TRADE_LIMIT_DISTANCE,minScore:TRADE_MIN_SCORE,maxSpread:TRADE_MAX_SPREAD,maxHoldMinutes:TRADE_MAX_HOLD_MINUTES,cooldownMinutes:TRADE_COOLDOWN_MINUTES,valid:tradingConfigValid()}}}
+function saveTrade(){try{const tmp=TRADE_STATE_PATH+'.tmp';fs.writeFileSync(tmp,JSON.stringify({tracked:trade.tracked,lastClosedAt:trade.lastClosedAt,day:trade.day,dailyOpens:trade.dailyOpens,history:trade.history.slice(0,50)}));fs.renameSync(tmp,TRADE_STATE_PATH)}catch(e){trade.lastError='Persistence failed: '+e.message;trade.armed=false;trade.executionEnabled=false;log(trade.lastError)}}
+function restoreTrade(){try{const v=JSON.parse(fs.readFileSync(TRADE_STATE_PATH,'utf8'));trade.tracked=v.tracked||null;trade.lastClosedAt=v.lastClosedAt||0;trade.day=v.day||trade.day;trade.dailyOpens=v.dailyOpens||0;trade.history=Array.isArray(v.history)?v.history.slice(0,50):[]}catch(e){if(e.code!=='ENOENT')log('Trade state could not be restored: '+e.message)}trade.armed=false;trade.executionEnabled=false;}
+function recordTrade(kind,details){trade.lastAction={time:new Date().toISOString(),kind,...details};trade.history.unshift(trade.lastAction);trade.history=trade.history.slice(0,50);saveTrade();log('Demo trade '+kind+': '+JSON.stringify(details).slice(0,180))}
+
 const restState={enabled:true,intervalSeconds:REST_POLL_SECONDS,requestedMarkets:REST_MAX_MARKETS,lastPoll:null,nextPoll:null,lastError:'',rateLimitedUntil:null,attempted:0,succeeded:0,failed:0,marketResults:{}};
 let restPolling=false,restTimer=null,restBackoffUntil=0;
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
@@ -77,15 +95,18 @@ async function discover(){
 
 function candleFromQuote(epic,mid,at){const bucket=Math.floor(at/FIVE)*FIVE;let c=current.get(epic);
  if(c&&bucket<c.bucket)return;
- if(c&&bucket>c.bucket){if(c.ticks>=2 && at-c.lastAt<=FIVE*2){const list=candles.get(epic)||[];list.push({time:new Date(c.bucket).toISOString(),open:c.open,high:c.high,low:c.low,close:c.close,ticks:c.ticks});candles.set(epic,list.slice(-150));}current.delete(epic);c=null;}
+ if(c&&bucket>c.bucket){if(c.ticks>=2 && at-c.lastAt<=FIVE*2){const list=candles.get(epic)||[];list.push({time:new Date(c.bucket).toISOString(),open:c.open,high:c.high,low:c.low,close:c.close,ticks:c.ticks});candles.set(epic,list.slice(-150));saveCandles();}current.delete(epic);c=null;}
  if(!c){c={bucket,open:mid,high:mid,low:mid,close:mid,ticks:0};current.set(epic,c)}
  c.high=Math.max(c.high,mid);c.low=Math.min(c.low,mid);c.close=mid;c.ticks++;c.lastAt=at;
 }
+function saveCandles(){try{const file=path.join(__dirname,'marketpulse-v39-candles.json');const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(Object.fromEntries(candles)));fs.renameSync(tmp,file)}catch(e){log('Candle persistence unavailable: '+e.message)}}
+function restoreCandles(){try{const obj=JSON.parse(fs.readFileSync(path.join(__dirname,'marketpulse-v39-candles.json'),'utf8'));for(const [epic,bars] of Object.entries(obj))if(Array.isArray(bars))candles.set(epic,bars.filter(x=>x&&Number.isFinite(x.close)&&Date.now()-Date.parse(x.time)<48*3600000).slice(-150))}catch(e){if(e.code!=='ENOENT')log('Candle restore: '+e.message)}}
 function ema(arr,period){let x=arr[0];for(const v of arr.slice(1))x=x+(v-x)*2/(period+1);return x}
 function rsi(arr,period=14){if(arr.length<period+1)return null;let up=0,down=0;for(let i=arr.length-period;i<arr.length;i++){const delta=arr[i]-arr[i-1];up+=Math.max(0,delta);down+=Math.max(0,-delta)}return down===0?100:100-100/(1+up/down)}
 function analyse(epic){const bars=candles.get(epic)||[],q=quotes.get(epic),fresh=q&&Date.now()-q.at<(q.source==='REST'?REST_STALE_MS:20000);
  if(!fresh)return {epic,direction:'STALE',score:0,bars:bars.length,reason:'No recent market price'};
  if(bars.length<30)return {epic,direction:'WARMING',score:0,bars:bars.length,reason:`${bars.length}/30 sampled 5-minute bars; ${q.source} observations, no historical REST requests`};
+ const recent=bars.slice(-30);if(recent.some((b,i)=>i>0&&Date.parse(b.time)-Date.parse(recent[i-1].time)>FIVE*1.1)||Date.now()-Date.parse(recent.at(-1).time)>FIVE*3)return {epic,direction:'WARMING',score:0,bars:bars.length,reason:'Need 30 recent consecutive sampled bars'};
  const a=bars.map(x=>x.close),e9=ema(a,9),e21=ema(a,21),r=rsi(a),last=a.at(-1);
  const direction=e9>e21&&r>=52&&r<=68?'LONG':e9<e21&&r>=32&&r<=48?'SHORT':'WAIT';
  const score=direction==='WAIT'?0:Math.min(90,Math.round(55+Math.min(20,Math.abs(e9-e21)/last*10000*2)+Math.max(0,15-Math.abs(r-(direction==='LONG'?60:40)))));
@@ -185,7 +206,7 @@ function startStream(){
  });
  client=ls;sub=subscriptions;ls.connect();
  for(const subscription of subscriptions)ls.subscribe(subscription);
- log(`V3.8 streaming compatibility diagnostics started: ${probes.length} probes across ${new Set(probes.map(x=>x.epic)).size} forex markets`);
+ log(`V3.9 streaming compatibility diagnostics started: ${probes.length} probes across ${new Set(probes.map(x=>x.epic)).size} forex markets`);
 }
 async function checkRestSnapshot(){
  try{const data=await api('/markets/CS.D.EURUSD.CFD.IP');const snap=data.snapshot||{};restSnapshot={epic:data.instrument?.epic||'CS.D.EURUSD.CFD.IP',bid:snap.bid??null,offer:snap.offer??null,marketStatus:snap.marketStatus??null,updateTime:snap.updateTime??null};restSnapshotError='';}
@@ -236,27 +257,69 @@ async function pollRest(){
     }
    }
   }
- }finally{restPolling=false;restState.nextPoll=new Date(Math.max(Date.now()+REST_POLL_SECONDS*1000,restBackoffUntil)).toISOString()}
+ }finally{restPolling=false;await tradingCycle();restState.nextPoll=new Date(Math.max(Date.now()+REST_POLL_SECONDS*1000,restBackoffUntil)).toISOString()}
 }
 function startRestPolling(){
  if(restTimer)clearInterval(restTimer);
  restTimer=setInterval(()=>pollRest().catch(e=>log('REST poll unexpected error: '+e.message)),REST_POLL_SECONDS*1000);
  pollRest().catch(e=>log('Initial REST poll: '+e.message));
- log(`V3.8 REST fallback enabled: ${REST_POLL_SECONDS}s interval, ${REST_MAX_MARKETS} markets`);
+ log(`V3.9 REST fallback enabled: ${REST_POLL_SECONDS}s interval, ${REST_MAX_MARKETS} markets`);
 }
 async function refreshAccount(){const a=await api('/accounts');const ac=(a.accounts||[]).find(x=>x.accountId===auth.accountId)||(a.accounts||[]).find(x=>x.accountType==='CFD');
  if(ac)account={accountId:ac.accountId,currency:ac.currency,balance:ac.balance?.balance,equity:ac.balance?.balance+ac.balance?.profitLoss};
  const p=await api('/positions','GET',null,'2');positions=(p.positions||[]).map(x=>({epic:x.market?.epic,direction:x.position?.direction,size:x.position?.size,dealId:x.position?.dealId}));lastAccountRefresh=new Date().toISOString();}
-async function init(){if(starting)return;starting=true;try{closeStream();await login();await discover();await refreshAccount();await checkRestSnapshot();startStream();startRestPolling()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
+
+// DEMO order execution: IG OTC v2 open, v1 close with _method DELETE; confirm every action.
+// Never retry an ambiguous order, and never send orders unless armed explicitly after boot.
+async function confirmDeal(ref){if(!ref)throw Error('IG did not return dealReference; action ambiguous. Disarmed.');for(let i=0;i<5;i++){await new Promise(r=>setTimeout(r,1000));try{const c=await api('/confirms/'+encodeURIComponent(ref));if(c.dealStatus==='ACCEPTED')return c;if(c.dealStatus==='REJECTED')throw Error('IG rejected: '+(c.reason||'unknown'));}catch(e){if(/rejected/i.test(e.message))throw e;if(i===4)throw e}}throw Error('Confirmation unavailable; manual reconciliation required')}
+function disarm(reason){trade.armed=false;trade.executionEnabled=false;trade.haltReason=reason;log('Demo automation disarmed: '+reason)}
+async function reconcilePositions(){const p=await api('/positions','GET',null,'2');const all=(p.positions||[]).map(x=>({epic:x.market?.epic,direction:x.position?.direction,size:Number(x.position?.size),dealId:x.position?.dealId,createdDate:x.position?.createdDate}));positions=all;lastAccountRefresh=new Date().toISOString();if(trade.tracked&&!all.some(x=>x.dealId===trade.tracked.dealId)){recordTrade('EXTERNAL_CLOSE',{dealId:trade.tracked.dealId});trade.tracked=null;trade.lastClosedAt=Date.now();saveTrade()}return all}
+async function openDemo(direction){const payload={currencyCode:'USD',direction:direction==='LONG'?'BUY':'SELL',epic:TRADE_EPIC,expiry:'-',forceOpen:true,guaranteedStop:false,orderType:'MARKET',size:TRADE_SIZE,stopDistance:TRADE_STOP_DISTANCE,limitDistance:TRADE_LIMIT_DISTANCE};
+ // Instrument currencyCode is not always USD; explicitly restrict to EUR/USD CFD until validated.
+ if(TRADE_EPIC!=='CS.D.EURUSD.CFD.IP')throw Error('Automatic execution currently restricted to EUR/USD CFD');
+ const response=await api('/positions/otc','POST',payload,'2');const conf=await confirmDeal(response.dealReference);if(!conf.dealId)throw Error('Accepted but no dealId; reconcile manually');trade.tracked={dealId:conf.dealId,epic:TRADE_EPIC,direction:payload.direction,size:TRADE_SIZE,openedAt:new Date().toISOString()};trade.dailyOpens++;recordTrade('OPEN',{dealId:conf.dealId,direction:payload.direction,size:TRADE_SIZE});return conf}
+async function closeDemo(reason){if(!trade.tracked)return;const pos=trade.tracked;const payload={dealId:pos.dealId,direction:pos.direction==='BUY'?'SELL':'BUY',orderType:'MARKET',size:pos.size};
+ // IG documented close route uses POST + _method: DELETE header, VERSION:1.
+ const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',CST:auth.cst,'X-SECURITY-TOKEN':auth.xst,VERSION:'1','Content-Type':'application/json',Accept:'application/json','_method':'DELETE'};
+ const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data={}}if(!response.ok||data.errorCode)throw Error('IG close failed: '+response.status+' '+(data.errorCode||raw.slice(0,100)));
+ const conf=await confirmDeal(data.dealReference);recordTrade('CLOSE',{dealId:pos.dealId,reason,confirmation:conf.dealStatus});trade.tracked=null;trade.lastClosedAt=Date.now();saveTrade();return conf}
+async function tradingCycle(){if(!trade.armed||!trade.executionEnabled||trade.busy||starting)return;trade.busy=true;
+ try{if(!tradingConfigValid())throw Error('Missing or invalid demo risk configuration');if(!auth||!auth.accountId)throw Error('No IG demo session');
+ const today=new Date().toISOString().slice(0,10);if(today!==trade.day){trade.day=today;trade.dailyOpens=0;saveTrade()}
+ const all=await reconcilePositions();const q=quotes.get(TRADE_EPIC),s=analyse(TRADE_EPIC);
+ const fresh=q&&Date.now()-q.at<=REST_POLL_SECONDS*1800&&q.marketState==='TRADEABLE'&&q.source==='REST';
+ const spread=q?q.ask-q.bid:Infinity;
+ trade.lastDecision={at:new Date().toISOString(),direction:s.direction,score:s.score,bars:s.bars,priceSource:q?.source||null,spread,reason:s.reason};
+ if(trade.tracked){const owned=all.find(x=>x.dealId===trade.tracked.dealId);if(!owned){disarm('Tracked position missing; reconcile manually');return}
+  const age=Date.now()-Date.parse(trade.tracked.openedAt);
+  const opposite=(trade.tracked.direction==='BUY'&&s.direction==='SHORT')||(trade.tracked.direction==='SELL'&&s.direction==='LONG');
+  if(age>=TRADE_MAX_HOLD_MINUTES*60000||opposite){if(!fresh){disarm('Cannot close automatically: price stale; check IG demo manually');return}await closeDemo(age>=TRADE_MAX_HOLD_MINUTES*60000?'MAX_HOLD':'REVERSAL')}
+  return;
+ }
+ if(all.length){trade.lastDecision.reason='Existing account positions detected; no new orders';return}
+ if(trade.dailyOpens>=TRADE_DAILY_CAP)return;
+ if(Date.now()-trade.lastClosedAt<TRADE_COOLDOWN_MINUTES*60000)return;
+ if(!fresh||spread>TRADE_MAX_SPREAD||!Number.isFinite(spread))return;
+ if(!['LONG','SHORT'].includes(s.direction)||s.score<TRADE_MIN_SCORE)return;
+ if((candles.get(TRADE_EPIC)||[]).length<30)return;
+ await openDemo(s.direction);
+ }catch(e){trade.lastError=String(e.message).slice(0,250);disarm('Trading error; manual review required');log('Demo trading stopped: '+trade.lastError)}finally{trade.busy=false}}
+
+async function init(){if(starting)return;starting=true;disarm('Reconnect requires re-arming');try{closeStream();await login();await discover();await refreshAccount();await checkRestSnapshot();startStream();startRestPolling()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});if(req.get('X-Admin-Token')!==token)return res.status(403).json({error:'Invalid admin token'});next()}
-app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.8.0',mode:'DEMO_MONITOR_ONLY',streamStatus,marketCount:markets.size}));
+app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.9.0',mode:'DEMO_AUTOMATION_OPT_IN',streamStatus,marketCount:markets.size}));
 app.get('/api/state',(req,res)=>{const now=Date.now(),list=[...markets.values()].map(m=>{const q=quotes.get(m.epic),s=analyse(m.epic);return {...m,...s,streaming:Boolean(q&&now-q.at<(q.source==='REST'?REST_STALE_MS:20000)),bid:q?.bid??null,ask:q?.ask??null,spread:q?.spread??null,marketState:q?.marketState||'UNKNOWN',lastTick:q?new Date(q.at).toISOString():null,ageSeconds:q?Math.round((now-q.at)/1000):null,priceSource:q?.source||null,igUpdateTime:q?.igUpdateTime||null}});
- res.json({version:'3.8.0',mode:'DEMO_MONITOR_ONLY',auto:false,orderExecutionEnabled:false,streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.lastTick&&x.ageSeconds<(x.priceSource==='REST'?REST_STALE_MS/1000:20)).length,restReceivingCount:list.filter(x=>x.priceSource==='REST'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries(diagnostics),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'Read-only demo monitor. No order submission endpoints.'})});
+ res.json({version:'3.9.0',mode:'DEMO_AUTOMATION_OPT_IN',auto:trade.armed,orderExecutionEnabled:trade.executionEnabled,trading:tradePublic(),streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.lastTick&&x.ageSeconds<(x.priceSource==='REST'?REST_STALE_MS/1000:20)).length,restReceivingCount:list.filter(x=>x.priceSource==='REST'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries(diagnostics),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'DEMO ONLY. Orders require valid risk settings and authenticated arming; disarmed after restart.'})});
 app.get('/api/ig/test',requireAdmin,async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/admin/reconnect',requireAdmin,async(req,res)=>{await init();res.json({ok:true,streamStatus,streamError})});
 app.post('/api/admin/refresh',requireAdmin,async(req,res)=>{try{await refreshAccount();res.json({ok:true,account,positions})}catch(e){res.status(502).json({error:e.message})}});
+
+app.post('/api/admin/trading/arm',requireAdmin,async(req,res)=>{if(trade.busy)return res.status(409).json({error:'Trading cycle running'});if(!tradingConfigValid())return res.status(400).json({error:'Configure DEMO_TRADE_SIZE (0-1), DEMO_STOP_DISTANCE, DEMO_LIMIT_DISTANCE and DEMO_MAX_SPREAD first'});if(TRADE_EPIC!=='CS.D.EURUSD.CFD.IP')return res.status(400).json({error:'Only EUR/USD CFD auto-execution supported'});if(req.body?.confirm!=='ARM_DEMO_ONLY')return res.status(400).json({error:'Send JSON {"confirm":"ARM_DEMO_ONLY"}'});try{const marketInfo=await api('/markets/'+encodeURIComponent(TRADE_EPIC));if(marketInfo.snapshot?.marketStatus!=='TRADEABLE')return res.status(409).json({error:'Market not tradeable'});const minDist=Number(marketInfo.dealingRules?.minNormalStopOrLimitDistance?.value);if(Number.isFinite(minDist)&&TRADE_STOP_DISTANCE<minDist)return res.status(400).json({error:'Stop distance below IG reported minimum',minDist});const all=await reconcilePositions();if(all.length||trade.tracked)return res.status(409).json({error:'Existing demo position or tracked deal; review and close manually before arming',positions:all});if(!account||account.accountId!==auth.accountId)return res.status(409).json({error:'Account mismatch'});trade.armed=true;trade.executionEnabled=true;trade.haltReason=null;trade.lastError=null;log('DEMO automation explicitly armed by admin');res.json({ok:true,trading:tradePublic()})}catch(e){res.status(502).json({error:e.message})}});
+app.post('/api/admin/trading/stop',requireAdmin,(req,res)=>{disarm('Emergency stop requested by admin. Existing positions remain open with broker stops.');res.json({ok:true,trading:tradePublic()})});
+app.post('/api/admin/trading/close',requireAdmin,async(req,res)=>{if(trade.busy)return res.status(409).json({error:'Trading cycle running'});disarm('Admin requested close');trade.busy=true;try{if(!trade.tracked)return res.status(409).json({error:'No bot-tracked position. Check IG manually.'});const all=await reconcilePositions();if(!all.some(x=>x.dealId===trade.tracked?.dealId))return res.status(409).json({error:'Tracked position not found'});await closeDemo('ADMIN_CLOSE');res.json({ok:true,trading:tradePublic()})}catch(e){trade.lastError=e.message;res.status(502).json({error:e.message,warning:'Check IG demo account for actual position status before retrying'})}finally{trade.busy=false}});
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-const port=Number(process.env.PORT)||3000;app.listen(port,()=>{log('V3.8 DEMO monitoring-only started; orders permanently disabled');init()});
+const port=Number(process.env.PORT)||3000;app.listen(port,()=>{restoreTrade();restoreCandles();log('V3.9 DEMO bot started DISARMED; no live-account trading supported');init()});
 setInterval(()=>{refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{checkRestSnapshot().catch(e=>log('REST snapshot check: '+e.message))},300000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;init()}},30000);
