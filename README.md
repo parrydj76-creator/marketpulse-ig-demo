@@ -1,28 +1,22 @@
-# MarketPulse AI V5.8 — IG DEMO order safety candidate
+# MarketPulse AI V5.9 — Render Free IG DEMO experimental
 
-Built from the user-supplied V5.7 server.js, preserving IG Lightstreamer pricing, strategy, REST fallback, dashboard, paper engine, and admin endpoints. **Not a verified ready-to-run unattended bot.**
-
-## Changes
-- IG POST order submissions are **never automatically retried** after authentication errors; GET reads may refresh auth.
-- Pending OPEN/CLOSE journal is written before broker submission and retained until confirmation and state persistence.
-- Corrupt local trade-state fails closed. A missing tracked broker position disarms rather than erasing the record.
-- Startup process lock acquired before listening.
-- Public diagnostics redact the account ID embedded in stream item names.
-- Auto-start and arming require `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=true`, an explicit operator assertion **only after actual supervised demo tests**.
-- `/api/state` includes `executionReadiness` diagnostics.
-- Broker execution remains blocked without durable storage.
+This version removes the **durable-storage hard requirement** for IG DEMO orders when `ALLOW_EPHEMERAL_IG_DEMO=true`. It does NOT enable real-money trading. It is a best-effort experimental build, not a reliable 24/7 trading service.
 
 ## Install
-1. Back up the current GitHub repository. Replace server.js and supporting package files while preserving the `public` directory.
-2. Keep existing IG credentials and ADMIN_TOKEN in Render Environment, never in GitHub.
-3. On Render Free use `ENABLE_IG_DEMO_ORDERS=false`, `PERSISTENT_STORAGE_CONFIRMED=false`, and `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=false`. You can monitor prices and test paper trading.
-4. For IG demo orders, move to an always-on instance with an actually mounted persistent disk, test persistence after restart, and confirm the IG market's minimum deal size, stop units, and currency. Set `IG_VERIFIED_MIN_SIZE`, `IG_VERIFIED_STOP_UNITS`, and positive DEMO trade size, stop, limit, max spread only after validation.
-5. Supervise one demo open, verify broker-side stops, close, and recovery after restart. Only then set `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=true`. Use admin endpoints to review risk and arm, or explicitly enable auto-start after validation.
-6. Inspect `/api/state` for version `5.8.0` and `executionReadiness`.
+1. Back up your existing GitHub repository, then upload these files to the canonical `main` branch.
+2. In Render, configure your existing DEMO credentials and `ADMIN_TOKEN` as secret environment variables.
+3. Start with `IG_ACCOUNT_TYPE=DEMO`, `ALLOW_EPHEMERAL_IG_DEMO=true`, `PERSISTENT_STORAGE_CONFIRMED=false`, `ENABLE_IG_DEMO_ORDERS=false`, `AUTO_START_DEMO_TRADING=false`, `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=false`.
+4. Redeploy; check `/api/state` reports `version=5.9.0` and `storage.ephemeralDemoOptIn=true`.
+5. Use the authenticated `/api/admin/trading/preview` endpoint to inspect IG dealing rules. Verify minimum size, stop units, contract exposure and available demo funds; then configure demo trade settings. Do not guess these values.
+6. After broker integration tests, set `ENABLE_IG_DEMO_ORDERS=true` and redeploy. The authenticated `/api/admin/trading/manual-test` endpoint requires a deliberate demo-only test request and 30 consecutive 5-minute streaming candles. Inspect the order, broker-side stops, confirmation, and close in IG.
+7. Only after independently verifying an open/close/restart lifecycle should `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=true` be set. `AUTO_START_DEMO_TRADING=true` then allows automatic arming after all remaining checks pass. No per-trade confirmation is needed.
 
-## Important limitations
-- **Render Free is not suitable for unattended broker execution**; this build deliberately refuses broker execution without persistent storage.
-- A directory lock is not a distributed lock. Avoid running more than one service instance.
-- A pending ambiguous order intentionally blocks further trading until manual broker reconciliation.
-- Code syntax checks do not validate IG contract details or API execution.
-- This is experimental trading software. Demo profits do not predict live results.
+## Major limitations
+- Render Free sleeps/restarts; trading stops during downtime and may miss signals.
+- The local daily counter, cooldown, signal history and order journal may reset after a restart. The bot will refuse new orders when it sees existing IG positions, but cannot reliably reconstruct all historical trades or unresolved submissions. **Do not rely on the local daily cap as a hard limit in ephemeral mode.**
+- A pending order may have been accepted even if the API times out. Never retry an uncertain order until it is independently reconciled in IG.
+- Broker-side attached stop and limit orders are critical; check they are actually present in the IG demo platform.
+- Only EUR/USD CFD is supported for demo execution.
+- Keep real IG accounts and credentials entirely separate.
+
+This release is a source-code update. Syntax validation is not proof that IG broker orders work.
