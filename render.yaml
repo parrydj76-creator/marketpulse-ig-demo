@@ -1,19 +1,40 @@
 services:
   - type: web
-    name: marketpulse-ig-demo-v33
+    name: marketpulse-ig-demo
     runtime: node
     plan: starter
     buildCommand: npm install
-    startCommand: npm start
-    healthCheckPath: /api/health
+    startCommand: node server.js
+    healthCheckPath: /api/state
+    numInstances: 1
+    disk:
+      name: marketpulse-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: IG_ACCOUNT_TYPE
         value: DEMO
-      - key: IG_API_KEY
-        sync: false
-      - key: IG_USERNAME
-        sync: false
-      - key: IG_PASSWORD
-        sync: false
-      - key: ADMIN_TOKEN
-        sync: false
+      - key: MP_MULTI_MODE
+        value: 'true'
+      - key: DATA_DIR
+        value: /var/data/marketpulse
+      - key: MP_JOURNAL_PATH
+        value: /var/data/marketpulse/multi-journal.json
+      - key: MP_RISK_SETTINGS_PATH
+        value: /var/data/marketpulse/multi-risk.json
+      - key: ENABLE_IG_DEMO_ORDERS
+        value: 'false'
+      - key: MP_V65_DEMO_EXECUTION
+        value: 'false'
+      - key: MP_AUTO_RESUME
+        value: 'false'
+      - key: PERSISTENT_STORAGE_CONFIRMED
+        value: 'false'
+      - key: MP_DURABLE_JOURNAL_VERIFIED
+        value: 'false'
+      - key: MP_DURABLE_RISK_STORAGE_VERIFIED
+        value: 'false'
+      - key: MP_V65_LIFECYCLE_TESTED
+        value: 'false'
+      - key: MP_SINGLE_INSTANCE_VERIFIED
+        value: 'false'
