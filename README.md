@@ -1,4 +1,4 @@
-# MarketPulse AI V6.2 — Seven Major Forex Pairs (IG DEMO only)
+# MarketPulse AI V6.2.1 — Seven Major Forex Pairs (IG DEMO only)
 
 This is the full server code patched from the supplied V6.1 project.
 
@@ -18,3 +18,6 @@ Allowed CFD EPICs: EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD, AUDUSD, NZDUSD. No mi
 - Render Free ephemeral storage cannot safely preserve the journal or daily trade counts after restarts. Auto-resume remains fail-closed without persistent storage and a restored journal.
 - The app may still perform periodic account, snapshot and REST fallback calls. Avoid multiple Render instances using the same API credentials.
 - No live-money trading. No guarantee of uninterrupted operation or profitable signals.
+
+## V6.2.1 fix
+Fixed the CommonJS export of `EPICS` in `multi-engine.js` so `require('./multi-engine')` does not throw `ReferenceError: EPICS is not defined`. The full deployment package is included.

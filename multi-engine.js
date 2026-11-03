@@ -62,4 +62,8 @@ function createMultiEngine(ctx){
  function resetOperatorStop(){if(state.pending)throw Error('Pending order unresolved');state.operatorStop=false;save();return status()}
  return {status,tick,stop,resetOperatorStop,reconcile,configs};
 }
-module.exports={createMultiEngine,EPICS};
+module.exports={createMultiEngine,EPICS:Object.freeze([
+  'CS.D.EURUSD.CFD.IP','CS.D.GBPUSD.CFD.IP','CS.D.USDJPY.CFD.IP',
+  'CS.D.USDCHF.CFD.IP','CS.D.USDCAD.CFD.IP','CS.D.AUDUSD.CFD.IP',
+  'CS.D.NZDUSD.CFD.IP'
+])};
