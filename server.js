@@ -11,9 +11,10 @@ const MAX_DISCOVERY_MARKETS=Math.min(500,Math.max(1,Number(process.env.DISCOVERY
 const configEpics=String(process.env.IG_EPICS||'').split(',').map(x=>x.trim()).filter(x=>/^CS\.D\.[A-Z]{6}\.(?:CFD|MINI)\.IP$/.test(x));
 const TEST_ONE=process.env.TEST_ONE_FOREX!=='false';
 const PROBE_MINI=process.env.PROBE_EURUSD_MINI!=='false';
+const PROBE_ACCOUNT=process.env.PROBE_ACCOUNT_STREAM!=='false';
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
 let accepted=new Set(),diagnostics=new Map();
-let probeStartedAt=null;
+let probeStartedAt=null,restSnapshot=null,restSnapshotError="",restSnapshotAt=null;
 let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',lastConnected=null,account=null,positions=[],lastAccountRefresh=null,lastDiscovery=null,discoverError='',reconnectAt=0,starting=false;
 function log(msg){events.unshift({time:new Date().toISOString(),message:String(msg).slice(0,300)});events.length=Math.min(events.length,100);console.log('[MarketPulse]',msg)}
 function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null}
@@ -104,6 +105,7 @@ function startStream(){
  const probes=[];
  for(const epic of epics){
   probes.push({epic,kind:'standard',fields:['BID','OFFER','UPDATE_TIME','MARKET_STATE']});
+  if(TEST_ONE)probes.push({epic,kind:'no-account',fields:['BID','OFFER','UPDATE_TIME','MARKET_STATE']});
   if(TEST_ONE&&epic==='CS.D.EURUSD.CFD.IP'){
    probes.push({epic,kind:'legacy',fields:['BIDPRICE1','ASKPRICE1','DLG_FLAG','TIMESTAMP','DELAY']});
   }
@@ -115,10 +117,10 @@ function startStream(){
  probeStartedAt=new Date().toISOString();
  for(const {epic,kind,fields} of probes){
   const key=epic+'|'+kind;
-  const item='PRICE:'+auth.accountId+':'+epic;
+  const item=kind==='no-account'?'PRICE:'+epic:'PRICE:'+auth.accountId+':'+epic;
   const subscription=new Subscription('MERGE',item,fields);
   subscription.setRequestedSnapshot('yes');
-  diagnostics.set(key,{epic,kind,fields,subscribed:false,updates:0,validQuotes:0,errors:[],lastEvent:null,lastFields:null});
+  diagnostics.set(key,{epic,kind,item,fields,subscribed:false,updates:0,validQuotes:0,errors:[],lastEvent:null,lastFields:null});
   subscription.addListener({
    onSubscription(){
     accepted.add(key);
@@ -157,28 +159,48 @@ function startStream(){
   });
   subscriptions.push(subscription);
  }
+ // ACCOUNT subscription checks whether the authenticated streaming session can deliver
+ // any account events. A quiet account stream is not proof of failure.
+ if(PROBE_ACCOUNT){
+  const key='ACCOUNT|control';
+  const fields=['AVAILABLE_CASH','PNL','DEPOSIT','FUNDS','MARGIN'];
+  const subscription=new Subscription('MERGE','ACCOUNT:'+auth.accountId,fields);
+  subscription.setRequestedSnapshot('yes');
+  diagnostics.set(key,{epic:null,kind:'account-control',fields,subscribed:false,updates:0,validQuotes:0,errors:[],lastEvent:null,lastFields:null});
+  subscription.addListener({
+   onSubscription(){accepted.add(key);diagnostics.get(key).subscribed=true;log('Probe accepted: '+key)},
+   onSubscriptionError(code,message){accepted.delete(key);const d=diagnostics.get(key);d.subscribed=false;d.errors.push({code,message:String(message).slice(0,150)});log('Account probe error '+code+': '+message)},
+   onItemUpdate(update){const d=diagnostics.get(key);d.updates++;d.lastEvent=new Date().toISOString();d.lastFields=Object.fromEntries(fields.map(f=>[f,update.getValue(f)]));if(d.updates<=2)log('Account probe update received')}
+  });
+  subscriptions.push(subscription);
+ }
  ls.addListener({
   onStatusChange(status){streamStatus=status;if(String(status).startsWith('CONNECTED'))lastConnected=new Date().toISOString();log('Lightstreamer status: '+status)},
   onServerError(code,message){streamError=`Server ${code}: ${message}`;log(streamError)}
  });
  client=ls;sub=subscriptions;ls.connect();
  for(const subscription of subscriptions)ls.subscribe(subscription);
- log(`V3.6 streaming diagnostics started: ${probes.length} probes across ${new Set(probes.map(x=>x.epic)).size} forex markets`);
+ log(`V3.7 streaming compatibility diagnostics started: ${probes.length} probes across ${new Set(probes.map(x=>x.epic)).size} forex markets`);
+}
+async function checkRestSnapshot(){
+ try{const data=await api('/markets/CS.D.EURUSD.CFD.IP');const snap=data.snapshot||{};restSnapshot={epic:data.instrument?.epic||'CS.D.EURUSD.CFD.IP',bid:snap.bid??null,offer:snap.offer??null,marketStatus:snap.marketStatus??null,updateTime:snap.updateTime??null};restSnapshotError='';}
+ catch(e){restSnapshotError=e.message;restSnapshot=null;}restSnapshotAt=new Date().toISOString();log('REST market snapshot: '+(restSnapshotError||JSON.stringify(restSnapshot)));
 }
 async function refreshAccount(){const a=await api('/accounts');const ac=(a.accounts||[]).find(x=>x.accountId===auth.accountId)||(a.accounts||[]).find(x=>x.accountType==='CFD');
  if(ac)account={accountId:ac.accountId,currency:ac.currency,balance:ac.balance?.balance,equity:ac.balance?.balance+ac.balance?.profitLoss};
  const p=await api('/positions','GET',null,'2');positions=(p.positions||[]).map(x=>({epic:x.market?.epic,direction:x.position?.direction,size:x.position?.size,dealId:x.position?.dealId}));lastAccountRefresh=new Date().toISOString();}
-async function init(){if(starting)return;starting=true;try{await login();await discover();await refreshAccount();startStream()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
+async function init(){if(starting)return;starting=true;try{await login();await discover();await refreshAccount();await checkRestSnapshot();startStream()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});if(req.get('X-Admin-Token')!==token)return res.status(403).json({error:'Invalid admin token'});next()}
-app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.6.0',mode:'DEMO_MONITOR_ONLY',streamStatus,marketCount:markets.size}));
+app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.7.0',mode:'DEMO_MONITOR_ONLY',streamStatus,marketCount:markets.size}));
 app.get('/api/state',(req,res)=>{const now=Date.now(),list=[...markets.values()].map(m=>{const q=quotes.get(m.epic),s=analyse(m.epic);return {...m,...s,bid:q?.bid??null,ask:q?.ask??null,spread:q?.spread??null,marketState:q?.marketState||'UNKNOWN',lastTick:q?new Date(q.at).toISOString():null,ageSeconds:q?Math.round((now-q.at)/1000):null}});
- res.json({version:'3.6.0',mode:'DEMO_MONITOR_ONLY',auto:false,orderExecutionEnabled:false,streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:accepted.size,priceReceivingCount:list.filter(x=>x.streaming).length,diagnostics:Object.fromEntries(diagnostics),probeStartedAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'Read-only demo monitor. No order submission endpoints.'})});
+ res.json({version:'3.7.0',mode:'DEMO_MONITOR_ONLY',auto:false,orderExecutionEnabled:false,streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:accepted.size,priceReceivingCount:list.filter(x=>x.streaming).length,diagnostics:Object.fromEntries(diagnostics),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'Read-only demo monitor. No order submission endpoints.'})});
 app.get('/api/ig/test',requireAdmin,async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/admin/reconnect',requireAdmin,async(req,res)=>{await init();res.json({ok:true,streamStatus,streamError})});
 app.post('/api/admin/refresh',requireAdmin,async(req,res)=>{try{await refreshAccount();res.json({ok:true,account,positions})}catch(e){res.status(502).json({error:e.message})}});
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-const port=Number(process.env.PORT)||3000;app.listen(port,()=>{log('V3.6 DEMO monitoring-only started; orders permanently disabled');init()});
+const port=Number(process.env.PORT)||3000;app.listen(port,()=>{log('V3.7 DEMO monitoring-only started; orders permanently disabled');init()});
 setInterval(()=>{refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
+setInterval(()=>{checkRestSnapshot().catch(e=>log('REST snapshot check: '+e.message))},300000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;init()}},30000);
 
 setInterval(()=>{if(probeStartedAt&&accepted.size>0&&[...diagnostics.values()].every(x=>x.updates===0)){log('Diagnostic watchdog: accepted subscriptions but no onItemUpdate callbacks yet');}},300000);
