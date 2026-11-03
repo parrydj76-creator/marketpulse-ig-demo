@@ -10,8 +10,10 @@ const MAX_DISCOVERY_NODES=Math.min(100,Math.max(1,Number(process.env.DISCOVERY_N
 const MAX_DISCOVERY_MARKETS=Math.min(500,Math.max(1,Number(process.env.DISCOVERY_MARKET_LIMIT)||150));
 const configEpics=String(process.env.IG_EPICS||'').split(',').map(x=>x.trim()).filter(x=>/^CS\.D\.[A-Z]{6}\.(?:CFD|MINI)\.IP$/.test(x));
 const TEST_ONE=process.env.TEST_ONE_FOREX!=='false';
+const PROBE_MINI=process.env.PROBE_EURUSD_MINI!=='false';
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
 let accepted=new Set(),diagnostics=new Map();
+let probeStartedAt=null;
 let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',lastConnected=null,account=null,positions=[],lastAccountRefresh=null,lastDiscovery=null,discoverError='',reconnectAt=0,starting=false;
 function log(msg){events.unshift({time:new Date().toISOString(),message:String(msg).slice(0,300)});events.length=Math.min(events.length,100);console.log('[MarketPulse]',msg)}
 function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null}
@@ -83,60 +85,100 @@ function analyse(epic){const bars=candles.get(epic)||[],q=quotes.get(epic),fresh
  const score=direction==='WAIT'?0:Math.min(90,Math.round(55+Math.min(20,Math.abs(e9-e21)/last*10000*2)+Math.max(0,15-Math.abs(r-(direction==='LONG'?60:40)))));
  return {epic,direction,score,bars:bars.length,rsi:r,ema9:e9,ema21:e21,reason:'Experimental closed-candle heuristic, not a win probability'};
 }
-function closeStream(){accepted.clear();diagnostics.clear();if(client){try{if(sub)for(const item of sub)client.unsubscribe(item);client.disconnect()}catch{} }client=null;sub=null;for(const m of markets.values())m.streaming=false;}
+function closeStream(){
+ accepted.clear();diagnostics.clear();probeStartedAt=null;
+ if(client){try{if(sub)for(const item of sub)client.unsubscribe(item);client.disconnect()}catch(e){log('Stream cleanup: '+e.message)}}
+ client=null;sub=null;for(const m of markets.values())m.streaming=false;
+}
 function startStream(){
  if(!auth?.streamUrl||!auth.accountId)throw Error('IG login did not supply streaming endpoint/account');
  closeStream();streamStatus='connecting';streamError='';
- // Use the streaming endpoint supplied by IG login.
  const ls=new LightstreamerClient(auth.streamUrl,null);
  ls.connectionDetails.setUser(auth.accountId);
  ls.connectionDetails.setPassword(`CST-${auth.cst}|XST-${auth.xst}`);
  const ordered=[...markets.keys()].sort((a,b)=>Number(b==='CS.D.EURUSD.CFD.IP')-Number(a==='CS.D.EURUSD.CFD.IP'));
-  const epics=ordered.slice(0,TEST_ONE?1:MAX);if(!epics.length)throw Error('No forex markets discovered');
- // Test the account-scoped IG PRICE item. Subscription acceptance alone does not confirm prices.
- // Subscribe individually so an unsupported instrument does not block all others.
- const subscriptions=[];
+ const epics=ordered.slice(0,TEST_ONE?1:MAX);
+ if(!epics.length)throw Error('No forex markets discovered');
+ // Two independent diagnostic subscriptions on EUR/USD CFD: standard IG price fields
+ // and the legacy field set from V3.5. A MINI standard-fields probe is optional.
+ const probes=[];
  for(const epic of epics){
+  probes.push({epic,kind:'standard',fields:['BID','OFFER','UPDATE_TIME','MARKET_STATE']});
+  if(TEST_ONE&&epic==='CS.D.EURUSD.CFD.IP'){
+   probes.push({epic,kind:'legacy',fields:['BIDPRICE1','ASKPRICE1','DLG_FLAG','TIMESTAMP','DELAY']});
+  }
+ }
+ if(TEST_ONE&&PROBE_MINI&&markets.has('CS.D.EURUSD.MINI.IP')){
+  probes.push({epic:'CS.D.EURUSD.MINI.IP',kind:'mini-standard',fields:['BID','OFFER','UPDATE_TIME','MARKET_STATE']});
+ }
+ const subscriptions=[];
+ probeStartedAt=new Date().toISOString();
+ for(const {epic,kind,fields} of probes){
+  const key=epic+'|'+kind;
   const item='PRICE:'+auth.accountId+':'+epic;
-  const subscription=new Subscription('MERGE',item,['BIDPRICE1','ASKPRICE1','DLG_FLAG','TIMESTAMP','DELAY']);
+  const subscription=new Subscription('MERGE',item,fields);
   subscription.setRequestedSnapshot('yes');
+  diagnostics.set(key,{epic,kind,fields,subscribed:false,updates:0,validQuotes:0,errors:[],lastEvent:null,lastFields:null});
   subscription.addListener({
-   onSubscription(){accepted.add(epic);log('Price subscription accepted: '+epic)},
-   onSubscriptionError(code,message){accepted.delete(epic);streamError=`${epic}: subscription ${code}: ${message}`;log(streamError)},
+   onSubscription(){
+    accepted.add(key);
+    const d=diagnostics.get(key);if(d)d.subscribed=true;
+    log('Probe accepted: '+key);
+   },
+   onSubscriptionError(code,message){
+    accepted.delete(key);const d=diagnostics.get(key);
+    if(d){d.subscribed=false;d.errors.push({code,message:String(message).slice(0,150)});}
+    streamError=`${key}: subscription ${code}: ${message}`;log(streamError);
+   },
+   onItemLostUpdates(itemName,lostUpdates){log(`Probe lost updates ${key}: ${lostUpdates}`)},
    onItemUpdate(update){
+    const d=diagnostics.get(key);if(!d)return;
+    d.updates++;d.lastEvent=new Date().toISOString();
+    const values={};
+    for(const field of fields){try{values[field]=update.getValue(field)}catch(e){values[field]='FIELD_ERROR'}}
+    d.lastFields=values;
+    if(d.updates<=3)log('Raw price event '+key+' '+JSON.stringify(values));
     const old=quotes.get(epic)||{};
-     const d=diagnostics.get(epic)||{updates:0};d.updates++;
-     if(d.updates<=3){d.lastFields={};for(const field of ['BIDPRICE1','ASKPRICE1','DLG_FLAG','TIMESTAMP','DELAY'])d.lastFields[field]=update.getValue(field);log('First price event '+epic+' '+JSON.stringify(d.lastFields));}
-     diagnostics.set(epic,d);
-    const bid=n(update.getValue('BIDPRICE1'))??old.bid;
-    const ask=n(update.getValue('ASKPRICE1'))??old.ask;
-    if(bid==null||ask==null||bid<=0||ask<=bid)return;
-    const state=update.getValue('DLG_FLAG')||old.marketState||'UNKNOWN';
-    const delayed=update.getValue('DELAY')??old.delayed??null;
+    const bid=n(values.BID??values.BIDPRICE1)??old.bid;
+    const ask=n(values.OFFER??values.ASKPRICE1)??old.ask;
+    if(bid==null||ask==null||bid<=0||ask<=bid){
+     if(d.updates<=3)log('Quote not yet valid '+key);
+     return;
+    }
+    d.validQuotes++;
+    const state=values.MARKET_STATE??values.DLG_FLAG??old.marketState??'UNKNOWN';
+    const delayed=values.DELAY??old.delayed??null;
     const now=Date.now();quotes.set(epic,{bid,ask,spread:ask-bid,at:now,marketState:state,delayed});
     const market=markets.get(epic);if(market)market.streaming=true;
-    if(String(delayed)!=='1')candleFromQuote(epic,(bid+ask)/2,now);
+    // Only build candles for non-delayed quotes, avoiding closed/suspended markets.
+    if(String(delayed)!=='1'&&!['CLOSED','SUSPENDED','OFFLINE'].includes(String(state).toUpperCase()))candleFromQuote(epic,(bid+ask)/2,now);
     signals.set(epic,analyse(epic));
    }
   });
   subscriptions.push(subscription);
  }
- ls.addListener({onStatusChange(status){streamStatus=status;if(String(status).startsWith('CONNECTED'))lastConnected=new Date().toISOString()},onServerError(code,message){streamError=`Server ${code}: ${message}`;log(streamError)}});
- client=ls;sub=subscriptions;ls.connect();for(const subscription of subscriptions)ls.subscribe(subscription);
- log(`Connecting IG PRICE stream for ${epics.length} forex markets`);
+ ls.addListener({
+  onStatusChange(status){streamStatus=status;if(String(status).startsWith('CONNECTED'))lastConnected=new Date().toISOString();log('Lightstreamer status: '+status)},
+  onServerError(code,message){streamError=`Server ${code}: ${message}`;log(streamError)}
+ });
+ client=ls;sub=subscriptions;ls.connect();
+ for(const subscription of subscriptions)ls.subscribe(subscription);
+ log(`V3.6 streaming diagnostics started: ${probes.length} probes across ${new Set(probes.map(x=>x.epic)).size} forex markets`);
 }
 async function refreshAccount(){const a=await api('/accounts');const ac=(a.accounts||[]).find(x=>x.accountId===auth.accountId)||(a.accounts||[]).find(x=>x.accountType==='CFD');
  if(ac)account={accountId:ac.accountId,currency:ac.currency,balance:ac.balance?.balance,equity:ac.balance?.balance+ac.balance?.profitLoss};
  const p=await api('/positions','GET',null,'2');positions=(p.positions||[]).map(x=>({epic:x.market?.epic,direction:x.position?.direction,size:x.position?.size,dealId:x.position?.dealId}));lastAccountRefresh=new Date().toISOString();}
 async function init(){if(starting)return;starting=true;try{await login();await discover();await refreshAccount();startStream()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});if(req.get('X-Admin-Token')!==token)return res.status(403).json({error:'Invalid admin token'});next()}
-app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.5.0',mode:'DEMO_MONITOR_ONLY',streamStatus,marketCount:markets.size}));
+app.get('/api/health',(req,res)=>res.json({ok:true,version:'3.6.0',mode:'DEMO_MONITOR_ONLY',streamStatus,marketCount:markets.size}));
 app.get('/api/state',(req,res)=>{const now=Date.now(),list=[...markets.values()].map(m=>{const q=quotes.get(m.epic),s=analyse(m.epic);return {...m,...s,bid:q?.bid??null,ask:q?.ask??null,spread:q?.spread??null,marketState:q?.marketState||'UNKNOWN',lastTick:q?new Date(q.at).toISOString():null,ageSeconds:q?Math.round((now-q.at)/1000):null}});
- res.json({version:'3.5.0',mode:'DEMO_MONITOR_ONLY',auto:false,orderExecutionEnabled:false,streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:accepted.size,priceReceivingCount:list.filter(x=>x.streaming).length,diagnostics:Object.fromEntries(diagnostics),testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'Read-only demo monitor. No order submission endpoints.'})});
-app.get('/api/ig/test',async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
+ res.json({version:'3.6.0',mode:'DEMO_MONITOR_ONLY',auto:false,orderExecutionEnabled:false,streamStatus,streamError,lastConnected,account,positions,lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:accepted.size,priceReceivingCount:list.filter(x=>x.streaming).length,diagnostics:Object.fromEntries(diagnostics),probeStartedAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'Read-only demo monitor. No order submission endpoints.'})});
+app.get('/api/ig/test',requireAdmin,async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/admin/reconnect',requireAdmin,async(req,res)=>{await init();res.json({ok:true,streamStatus,streamError})});
 app.post('/api/admin/refresh',requireAdmin,async(req,res)=>{try{await refreshAccount();res.json({ok:true,account,positions})}catch(e){res.status(502).json({error:e.message})}});
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-const port=Number(process.env.PORT)||3000;app.listen(port,()=>{log('V3.5 DEMO monitoring-only started; orders permanently disabled');init()});
+const port=Number(process.env.PORT)||3000;app.listen(port,()=>{log('V3.6 DEMO monitoring-only started; orders permanently disabled');init()});
 setInterval(()=>{refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;init()}},30000);
+
+setInterval(()=>{if(probeStartedAt&&accepted.size>0&&[...diagnostics.values()].every(x=>x.updates===0)){log('Diagnostic watchdog: accepted subscriptions but no onItemUpdate callbacks yet');}},300000);
