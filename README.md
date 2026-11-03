@@ -1,22 +1,12 @@
-# MarketPulse AI V5.9 — Render Free IG DEMO experimental
+# MarketPulse AI V6.1 — Dynamic IG Demo Forex Discovery
 
-This version removes the **durable-storage hard requirement** for IG DEMO orders when `ALLOW_EPHEMERAL_IG_DEMO=true`. It does NOT enable real-money trading. It is a best-effort experimental build, not a reliable 24/7 trading service.
+This extends V6.0 to discover forex CFD pairs rather than hardcoding three. It searches a broad currency cross-set and includes IG-reported eligible CFD markets, up to `DISCOVERY_MARKET_LIMIT` (default 150). IG discovery/search results and subscription capacity may limit coverage; it does **not** guarantee every IG forex instrument will be found. Add missing exact EPICs to `IG_EPICS` if needed.
 
 ## Install
-1. Back up your existing GitHub repository, then upload these files to the canonical `main` branch.
-2. In Render, configure your existing DEMO credentials and `ADMIN_TOKEN` as secret environment variables.
-3. Start with `IG_ACCOUNT_TYPE=DEMO`, `ALLOW_EPHEMERAL_IG_DEMO=true`, `PERSISTENT_STORAGE_CONFIRMED=false`, `ENABLE_IG_DEMO_ORDERS=false`, `AUTO_START_DEMO_TRADING=false`, `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=false`.
-4. Redeploy; check `/api/state` reports `version=5.9.0` and `storage.ephemeralDemoOptIn=true`.
-5. Use the authenticated `/api/admin/trading/preview` endpoint to inspect IG dealing rules. Verify minimum size, stop units, contract exposure and available demo funds; then configure demo trade settings. Do not guess these values.
-6. After broker integration tests, set `ENABLE_IG_DEMO_ORDERS=true` and redeploy. The authenticated `/api/admin/trading/manual-test` endpoint requires a deliberate demo-only test request and 30 consecutive 5-minute streaming candles. Inspect the order, broker-side stops, confirmation, and close in IG.
-7. Only after independently verifying an open/close/restart lifecycle should `IG_DEMO_ORDER_LIFECYCLE_VERIFIED=true` be set. `AUTO_START_DEMO_TRADING=true` then allows automatic arming after all remaining checks pass. No per-trade confirmation is needed.
+Upload `server.js`, `multi-engine.js`, `paper-engine.js`, `package.json`, and `public/multi.html` to your GitHub repository; preserve existing `public/control.html`. Keep private credentials in Render only. Start with `ENABLE_IG_DEMO_ORDERS=false`, `MP_AUTO_RESUME=false`, `MP_MULTI_MODE=true`, `TEST_ONE_FOREX=false`. View `/multi` and `/api/multi/status`.
 
-## Major limitations
-- Render Free sleeps/restarts; trading stops during downtime and may miss signals.
-- The local daily counter, cooldown, signal history and order journal may reset after a restart. The bot will refuse new orders when it sees existing IG positions, but cannot reliably reconstruct all historical trades or unresolved submissions. **Do not rely on the local daily cap as a hard limit in ephemeral mode.**
-- A pending order may have been accepted even if the API times out. Never retry an uncertain order until it is independently reconciled in IG.
-- Broker-side attached stop and limit orders are critical; check they are actually present in the IG demo platform.
-- Only EUR/USD CFD is supported for demo execution.
-- Keep real IG accounts and credentials entirely separate.
+## Per-pair configuration
+For `GBPJPY`, set `MP_GBPJPY_ENABLED`, `MP_GBPJPY_SIZE`, `MP_GBPJPY_STOP_POINTS`, `MP_GBPJPY_LIMIT_POINTS`, `MP_GBPJPY_MAX_SPREAD_PRICE`, `MP_GBPJPY_MIN_SCORE`, `MP_GBPJPY_VERIFIED_MIN_SIZE`, `MP_GBPJPY_POINT_UNITS_VERIFIED`, `MP_GBPJPY_LIFECYCLE_VERIFIED`, and `MP_GBPJPY_CURRENCY_CODE`. **Do not copy EUR/USD point distances, deal sizes or spreads to other pairs.** Validate broker market rules and run a controlled demo lifecycle test per pair before enabling it.
 
-This release is a source-code update. Syntax validation is not proof that IG broker orders work.
+## Safety / limitations
+No live-account orders. Dynamic discovery does not mean all pairs are streamed concurrently: `MAX_STREAM_MARKETS` caps subscriptions at 40, default 20. Pairs outside the active stream are not eligible for automated orders. An enabled but unverified pair halts the automatic engine (fail closed). Render Free has no durable journal: unattended auto-resume remains blocked; do not set `PERSISTENT_STORAGE_CONFIRMED=true` without actual persistent storage. Environment settings persist, but pending orders and daily trade counts do not. This release is syntax-tested, not broker integration-tested.
