@@ -5,267 +5,153 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0b1120">
-<title>MarketPulse AI V3.3</title>
+<title>MarketPulse AI V3.4</title>
 <style>
+:root{color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:#0b1120;color:#e9f0ff;font:15px -apple-system,BlinkMacSystemFont,system-ui,sans-serif}
-main{max-width:1100px;margin:auto;padding:20px 14px 70px}
-h1{font-size:30px;margin:8px 0}
-h2{font-size:21px}
-small,.muted{color:#a6b4cd}
-.card{background:#19263d;border:1px solid #354869;border-radius:18px;padding:20px;margin-top:16px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
-.cards .card{margin:0}
-.metric{font-size:27px;font-weight:700;margin-top:10px}
-.tag{display:inline-block;border:1px solid #536a93;border-radius:30px;padding:7px 12px}
+main{max-width:1180px;margin:auto;padding:22px 15px 80px}
+.top{display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap}
+h1{font-size:clamp(25px,5vw,38px);margin:4px 0}
+h2{font-size:20px;margin:0 0 14px}
+.muted,small{color:#a6b4cd}
+.tag{border:1px solid #536a93;border-radius:99px;padding:8px 12px;display:inline-block;font-size:12px}
 .green{color:#72e4af}
 .yellow{color:#ffd276}
 .red{color:#ff9696}
-button{background:#557af0;color:white;border:0;border-radius:10px;padding:12px 16px;margin:5px 5px 5px 0;font:inherit}
-input,select{background:#101a2c;color:white;border:1px solid #435776;border-radius:9px;padding:10px;margin:5px}
+.card{background:#19263d;border:1px solid #354869;border-radius:18px;padding:20px;margin-top:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.cards .card{margin:0}
+.metric{font-size:clamp(21px,4vw,30px);font-weight:700;margin-top:8px}
+.notice{background:#242c3d;border-color:#8c784d}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{border:0;border-radius:10px;background:#557af0;color:#fff;padding:12px 15px;font:inherit;cursor:pointer}
+button.alt{background:#384a66}
+input,select{background:#101a2c;color:#e9f0ff;border:1px solid #435776;border-radius:10px;padding:12px;font:inherit;max-width:100%}
+label{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
 .scroll{overflow-x:auto}
-table{width:100%;min-width:720px;border-collapse:collapse}
-td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #344762}
+table{width:100%;border-collapse:collapse;min-width:730px}
+th,td{text-align:left;padding:11px 8px;border-bottom:1px solid #344762;white-space:nowrap}
 th{color:#aabbd5;font-size:12px}
-td{white-space:nowrap}
-.event{padding:10px 0;border-bottom:1px solid #344762;overflow-wrap:anywhere}
+td:first-child{font-weight:650}
+.activity{font-size:13px;border-bottom:1px solid #354869;padding:9px 0;overflow-wrap:anywhere}
+.activity time{color:#9baac3;margin-right:10px}
+.foot{margin-top:16px;color:#9baac3;font-size:12px}
 </style>
 </head>
 <body>
 <main>
+<div class="top">
+<div>
 <small>MARKETPULSE AI</small>
-<h1>V3.3 <span class="tag">LIVE FOREX · DEMO</span></h1>
-<p class="muted">IG live prices · 5-minute candles · Multi-currency monitoring</p>
+<h1>V3.4 <span class="tag">LIVE FOREX · DEMO</span></h1>
+<div class="muted">IG streaming prices · 5-minute candles · multi-currency monitor</div>
+</div>
+<span id="status" class="tag">Connecting…</span>
+</div>
 
-<section class="card">
-<strong class="yellow">🔒 Demo orders locked</strong>
-<p>Live market monitoring and experimental trading signals only. No CFD orders can be placed by this version.</p>
-<p>Signals require at least 30 completed five-minute candles. Without initial historical data, warm-up takes at least 150 minutes.</p>
-<button onclick="testIG()">Test IG connection</button>
-<button onclick="reconnect()">Reconnect live feed</button>
-<p id="error" class="red"></p>
+<section class="card notice">
+<strong class="yellow">🔒 Demo orders locked — monitoring only</strong>
+<p>V3.4 receives IG demo prices and calculates experimental signals. It cannot place orders. Signals require 30 completed five-minute candles; initial warm-up takes at least 150 minutes without historical data. Not financial advice.</p>
+<div class="actions">
+<button onclick="testIG()">Test IG login</button>
+<button class="alt" onclick="reconnect()">Reconnect stream</button>
+<button class="alt" onclick="refreshAccount()">Refresh account</button>
+</div>
+<p id="error" class="red" role="status"></p>
 </section>
 
-<div class="cards">
-<div class="card">
-<small>IG demo balance</small>
-<div class="metric" id="balance">—</div>
-<small id="currency"></small>
-</div>
-<div class="card">
-<small>Forex markets discovered</small>
-<div class="metric" id="discovered">—</div>
-</div>
-<div class="card">
-<small>Receiving live prices</small>
-<div class="metric" id="receiving">—</div>
-</div>
-<div class="card">
-<small>Live stream status</small>
-<div class="metric" id="status">Connecting</div>
-</div>
+<div class="cards" style="margin-top:16px">
+<div class="card"><small>IG demo balance</small><div id="balance" class="metric">—</div><small id="currency"></small></div>
+<div class="card"><small>Discovered markets</small><div id="discovered" class="metric">—</div></div>
+<div class="card"><small>Receiving ticks</small><div id="receiving" class="metric">—</div></div>
+<div class="card"><small>Risk setting</small><div class="metric">0.5%</div><small>Display only; orders disabled</small></div>
 </div>
 
 <section class="card">
-<h2>Live currency CFD scanner</h2>
-<input id="search" placeholder="Search EUR, GBP, USD…" oninput="render()">
-<select id="filter" onchange="render()">
-<option value="ALL">All currencies</option>
+<h2>Live forex market scanner</h2>
+<div class="toolbar">
+<label>Search <input id="search" placeholder="EUR, GBP, JPY…" oninput="render()"></label>
+<label>Filter <select id="filter" onchange="render()">
+<option value="ALL">All</option>
 <option value="LIVE">Live prices</option>
 <option value="LONG">LONG</option>
 <option value="SHORT">SHORT</option>
-<option value="WAIT">WAIT</option>
-<option value="WARMING">Warming</option>
+<option value="WARMING">Warming up</option>
 <option value="STALE">Stale</option>
-</select>
-
+</select></label>
+</div>
 <div class="scroll">
 <table>
-<thead>
-<tr>
-<th>Currency CFD</th>
-<th>Bid</th>
-<th>Ask</th>
-<th>Spread</th>
-<th>Signal</th>
-<th>Score</th>
-<th>Candles</th>
-<th>Age</th>
-</tr>
-</thead>
-<tbody id="markets">
-<tr><td>Waiting for live data…</td></tr>
-</tbody>
+<thead><tr><th>Currency CFD / EPIC</th><th>Bid</th><th>Ask</th><th>Spread</th><th>Signal</th><th>Score*</th><th>Closed bars</th><th>Age</th><th>Market</th></tr></thead>
+<tbody id="markets"><tr><td>Waiting for data…</td></tr></tbody>
 </table>
 </div>
-<p class="muted">Signals are experimental indicators, not predictions or probabilities of success.</p>
+<p class="foot">*Heuristic score, not probability. Prices and spreads are indicative streaming quotes; market availability and subscription limits depend on IG.</p>
 </section>
 
-<section class="card">
-<h2>Open IG demo positions</h2>
-<pre id="positions">Loading…</pre>
-</section>
-
-<section class="card">
-<h2>Bot activity</h2>
-<div id="activity">Waiting for events…</div>
-</section>
-
-<p class="muted">MarketPulse AI V3.3 · DEMO monitoring only · No order execution</p>
+<section class="card"><h2>Open IG demo positions</h2><div id="positions" class="muted">—</div></section>
+<section class="card"><h2>Activity</h2><div id="activity">—</div></section>
+<p class="foot">MarketPulse AI V3.4 · IG DEMO monitoring only · no trading endpoints · market coverage capped by MAX_STREAM_MARKETS · no historical-price REST calls.</p>
 </main>
-
 <script>
-let state = {};
-const el = id => document.getElementById(id);
+let state={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=(n,d=5)=>typeof n==='number'?n.toFixed(d):'—';
 
-function escapeHTML(value) {
-  return String(value ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;',
-    '<':'&lt;',
-    '>':'&gt;',
-    '"':'&quot;',
-    "'":'&#39;'
-  }[c]));
+async function call(url,opt={}){
+const r=await fetch(url,{cache:'no-store',...opt});
+const x=await r.json();
+if(!r.ok)throw Error(x.error||'Request failed');
+return x
 }
-
-function price(value, digits = 5) {
-  return typeof value === 'number'
-    ? value.toFixed(digits)
-    : '—';
+async function admin(url){
+let token=sessionStorage.getItem('mp33_token');
+if(!token){
+token=prompt('ADMIN_TOKEN from Render (not IG password)');
+if(!token)return;
+sessionStorage.setItem('mp33_token',token)
 }
-
-async function api(url, options = {}) {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    ...options
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Request failed');
-  }
-
-  return data;
+try{return await call(url,{method:'POST',headers:{'X-Admin-Token':token}})}
+catch(e){sessionStorage.removeItem('mp33_token');throw e}
 }
-
-async function testIG() {
-  try {
-    const result = await api('/api/ig/test');
-    alert(
-      'IG DEMO connected. Accounts: ' +
-      result.accountsReturned +
-      '. No orders placed.'
-    );
-  } catch (error) {
-    alert(error.message);
-  }
+async function testIG(){
+try{
+const x=await call('/api/ig/test');
+alert('IG DEMO connected. Accounts: '+x.accountsReturned+'; no orders placed.')
+}catch(e){alert(e.message)}
 }
-
-async function reconnect() {
-  let token = prompt('Enter ADMIN_TOKEN from Render');
-
-  if (!token) return;
-
-  try {
-    await api('/api/admin/reconnect', {
-      method: 'POST',
-      headers: { 'X-Admin-Token': token }
-    });
-
-    await refresh();
-  } catch (error) {
-    alert(error.message);
-  }
+async function reconnect(){
+try{await admin('/api/admin/reconnect');await refresh()}
+catch(e){alert(e.message)}
 }
-
-function render() {
-  const s = state;
-
-  el('balance').textContent =
-    s.account?.balance == null
-      ? '—'
-      : Number(s.account.balance).toLocaleString(
-          undefined,
-          { maximumFractionDigits: 2 }
-        );
-
-  el('currency').textContent = s.account?.currency || '';
-  el('discovered').textContent = s.marketCount ?? '—';
-
-  const all = s.markets || [];
-
-  el('receiving').textContent =
-    all.filter(x =>
-      x.ageSeconds != null && x.ageSeconds < 20
-    ).length + ' / ' + (s.marketCount ?? 0);
-
-  el('status').textContent = s.streamStatus || 'Unknown';
-  el('error').textContent = s.streamError || '';
-
-  const query = el('search').value.toLowerCase();
-  const filter = el('filter').value;
-
-  const rows = all.filter(x =>
-    (x.epic + ' ' + x.name).toLowerCase().includes(query)
-  ).filter(x =>
-    filter === 'ALL' ||
-    (filter === 'LIVE'
-      ? x.ageSeconds != null && x.ageSeconds < 20
-      : x.direction === filter)
-  );
-
-  el('markets').innerHTML = rows.map(x => `
-    <tr>
-      <td>
-        ${escapeHTML(x.name)}
-        <br>
-        <small>${escapeHTML(x.epic)}</small>
-      </td>
-      <td>${price(x.bid)}</td>
-      <td>${price(x.ask)}</td>
-      <td>${price(x.spread, 6)}</td>
-      <td class="${
-        x.direction === 'LONG' ? 'green' :
-        x.direction === 'SHORT' ? 'red' : 'yellow'
-      }">${escapeHTML(x.direction)}</td>
-      <td>${x.score || 0}</td>
-      <td>${x.bars || 0}/30</td>
-      <td>${
-        x.ageSeconds == null
-          ? '—'
-          : x.ageSeconds + 's'
-      }</td>
-    </tr>
-  `).join('') || '<tr><td colspan="8">No matching markets</td></tr>';
-
-  const positions = s.positions || [];
-
-  el('positions').textContent = positions.length
-    ? JSON.stringify(positions, null, 2)
-    : 'No open demo positions';
-
-  el('activity').innerHTML = (s.activity || [])
-    .slice(0, 20)
-    .map(x => `
-      <div class="event">
-        <small>${escapeHTML(x.time)}</small>
-        <div>${escapeHTML(x.message)}</div>
-      </div>
-    `).join('') || 'No events yet';
+async function refreshAccount(){
+try{await admin('/api/admin/refresh');await refresh()}
+catch(e){alert(e.message)}
 }
-
-async function refresh() {
-  try {
-    state = await api('/api/state');
-    render();
-  } catch (error) {
-    el('error').textContent = error.message;
-  }
+function render(){
+const s=state;
+$('balance').textContent=s.account?.balance==null?'—':Number(s.account.balance).toLocaleString(undefined,{maximumFractionDigits:2});
+$('currency').textContent=s.account?.currency||'';
+$('discovered').textContent=s.marketCount??'—';
+$('receiving').textContent=(s.markets||[]).filter(x=>x.ageSeconds!==null&&x.ageSeconds<20).length+' / '+(s.marketCount??0);
+$('status').textContent=s.streamStatus||'Unknown';
+$('status').className='tag '+(String(s.streamStatus).startsWith('CONNECTED')?'green':'yellow');
+$('error').textContent=s.streamError||s.discoverError||'';
+const query=$('search').value.toLowerCase(),filter=$('filter').value;
+const rows=(s.markets||[]).filter(x=>(x.epic+' '+x.name).toLowerCase().includes(query)).filter(x=>filter==='ALL'||(filter==='LIVE'?x.ageSeconds!==null&&x.ageSeconds<20:x.direction===filter)).sort((a,b)=>(b.score||0)-(a.score||0));
+$('markets').innerHTML=rows.slice(0,300).map(x=>`<tr><td title="${esc(x.epic)}">${esc(x.name)}<br><small>${esc(x.epic)}</small></td><td>${fmt(x.bid)}</td><td>${fmt(x.ask)}</td><td>${fmt(x.spread,6)}</td><td class="${x.direction==='LONG'?'green':x.direction==='SHORT'?'red':'yellow'}">${esc(x.direction)}</td><td>${x.score||0}</td><td>${x.bars||0}/30</td><td>${x.ageSeconds==null?'—':x.ageSeconds+'s'}</td><td>${esc(x.marketState)}</td></tr>`).join('')||'<tr><td colspan="9">No matching forex markets. Check stream and discovery status.</td></tr>';
+$('positions').textContent=(s.positions||[]).length?JSON.stringify(s.positions,null,2):'No open positions';
+$('activity').innerHTML=(s.activity||[]).slice(0,20).map(x=>`<div class="activity"><time>${esc(new Date(x.time).toLocaleTimeString())}</time>${esc(x.message)}</div>`).join('')||'No events yet'
 }
-
+async function refresh(){
+try{state=await call('/api/state');render()}
+catch(e){$('error').textContent=e.message}
+}
 refresh();
-setInterval(refresh, 5000);
+setInterval(refresh,5000);
 </script>
 </body>
 </html>
