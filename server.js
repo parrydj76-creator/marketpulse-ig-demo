@@ -433,6 +433,44 @@ app.get('/risk',(_req,res)=>res.sendFile(path.join(__dirname,'public','risk.html
 app.get('/api/admin/multi/risk',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(multiRiskStore.snapshot()));
 app.post('/api/admin/multi/risk/validate',requireAdmin,(req,res)=>res.json(multiRiskStore.validate(req.body?.pairs)));
 app.put('/api/admin/multi/risk',requireAdmin,(req,res)=>{try{res.json(multiRiskStore.save(req.body?.pairs,req.body?.revision))}catch(e){res.status(e.status||500).json({error:e.message,validation:e.validation||null})}});
+
+// V6.5: Hypothetical GBP monetary-risk preview only.
+// Never treat caller-supplied values as broker verification.
+app.post('/api/admin/multi/risk/monetary-preview',requireAdmin,(req,res)=>{
+ try{
+  const {calculateRisk}=require('./monetary-risk');
+  const x=req.body||{};
+  const equity=Number(x.equity);
+  const riskBudget=Number.isFinite(equity)&&equity>0?equity*0.005:null;
+  const result=calculateRisk({
+   equity:x.equity,
+   size:x.size,
+   entry:x.entry,
+   stop:x.stop,
+   direction:x.direction,
+   valuePerPriceUnit:x.valuePerPriceUnit,
+   contractVerified:false,
+   currencyConversionVerified:false
+  });
+  res.set('Cache-Control','no-store').json({
+   ...result,
+   riskBudget,
+   approved:false,
+   previewOnly:true,
+   monetaryRiskVerified:false,
+   verificationStatus:'BLOCKED_UNTIL_BROKER_DATA_VERIFIED',
+   warning:'Hypothetical calculation only. Contract units, GBP conversion, fees and slippage remain unverified. No order submitted.'
+  });
+ }catch(e){
+  res.status(400).json({
+   approved:false,
+   previewOnly:true,
+   monetaryRiskVerified:false,
+   error:e.message
+  });
+ }
+});
+
 app.get('/multi',(_req,res)=>res.sendFile(path.join(__dirname,'public','multi.html')));
 app.get('/api/multi/status',(_req,res)=>res.json(multi?multi.status():{enabled:false,note:'Set MP_MULTI_MODE=true'}));
 app.post('/api/admin/multi/initialize',requireAdmin,async(req,res)=>{try{if(!multi)throw Error('Multi mode disabled');res.json(await multi.initialize(req.body?.confirm))}catch(e){res.status(409).json({error:e.message})}});
