@@ -429,6 +429,41 @@ const multi=MULTI_MODE?require('./multi-engine').createMultiEngine({
  storageHealthy:()=>persistenceHealthy,brokerReady:()=>brokerReconciled,
  legacyBusy:()=>trade.busy||!!trade.pendingOrder||!!trade.tracked,log,riskStore:multiRiskStore
 }):null;
+// V6.5: Authenticated, read-only IG DEMO market specifications.
+app.get('/api/admin/market/specifications',requireAdmin,async(_req,res)=>{
+ try{
+  const epic='CS.D.EURUSD.CFD.IP';
+  const data=await api('/markets/'+encodeURIComponent(epic),'GET',null,'3');
+  const i=data.instrument||{};
+  const r=data.dealingRules||{};
+  const q=data.snapshot||{};
+  res.set('Cache-Control','no-store').json({
+   epic,
+   contractSize:i.contractSize??null,
+   lotSize:i.lotSize??null,
+   unit:i.unit??null,
+   valueOfOnePip:i.valueOfOnePip??null,
+   onePipMeans:i.onePipMeans??null,
+   minimumDealSize:r.minDealSize??null,
+   minimumStopDistance:r.minNormalStopOrLimitDistance??null,
+   marketStatus:q.marketStatus??null,
+   bid:q.bid??null,
+   offer:q.offer??null,
+   retrievedAt:new Date().toISOString(),
+   monetaryRiskVerified:false,
+   approved:false,
+   previewOnly:true,
+   warning:'IG-reported market data only. GBP contract exposure and currency conversion remain unverified. Broker execution blocked.'
+  });
+ }catch(e){
+  res.set('Cache-Control','no-store').status(502).json({
+   approved:false,
+   monetaryRiskVerified:false,
+   error:'IG market specifications unavailable'
+  });
+ }
+});
+
 app.get('/risk',(_req,res)=>res.sendFile(path.join(__dirname,'public','risk.html')));
 app.get('/api/admin/multi/risk',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(multiRiskStore.snapshot()));
 app.post('/api/admin/multi/risk/validate',requireAdmin,(req,res)=>res.json(multiRiskStore.validate(req.body?.pairs)));

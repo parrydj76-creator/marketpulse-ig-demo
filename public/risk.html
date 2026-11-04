@@ -35,6 +35,56 @@
 </section>
 
 
+
+<section id="ig-specifications" class="panel" hidden>
+  <h2>IG DEMO Market Specifications — EUR/USD</h2>
+  <p class="muted">
+    Broker-reported contract information. Read-only reference.
+  </p>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="muted">Contract size</div>
+      <h2 id="ig-contract-size">Awaiting IG data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Value of one pip</div>
+      <h2 id="ig-pip-value">Awaiting IG data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Minimum deal size</div>
+      <h2 id="ig-min-size">Awaiting IG data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Minimum stop distance</div>
+      <h2 id="ig-min-stop">Awaiting IG data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Market status</div>
+      <h2 id="ig-market-status">Awaiting IG data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">GBP monetary exposure</div>
+      <h2>UNVERIFIED</h2>
+    </div>
+  </div>
+
+  <p id="ig-spec-status" role="status" class="muted">
+    Unlock the Risk Centre to retrieve IG market specifications.
+  </p>
+
+  <p class="err">
+    BROKER EXECUTION BLOCKED — IG market specifications
+    do not independently verify GBP contract exposure,
+    currency conversion, fees or slippage.
+  </p>
+</section>
+
 <section id="hypothetical-risk" class="panel" hidden>
   <h2>Hypothetical Trade Risk Calculator</h2>
   <p class="muted">
@@ -86,7 +136,53 @@
 const KEYS=['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD'];const LABELS=['EUR/USD','GBP/USD','USD/JPY','USD/CHF','USD/CAD','AUD/USD','NZD/USD'];const NUMS=['size','stopDistance','limitDistance','maxSpread','minScore','minSizeVerified'];const BOOLS=['enabled','unitsVerified','lifecycleVerified'];const LABEL={size:'Deal size (IG contracts)',stopDistance:'Stop distance (IG points)',limitDistance:'Take-profit distance (IG points)',maxSpread:'Max spread (raw price units)',minScore:'Minimum signal score (65–90)',minSizeVerified:'IG verified minimum size',enabled:'Enable this pair in configuration',unitsVerified:'IG stop point units independently verified',lifecycleVerified:'IG demo order lifecycle independently verified',currencyCode:'IG instrument currency code'};
 let token='',data=null;const $=id=>document.getElementById(id);function message(s,error=false){$('message').className=error?'err':'ok';$('message').textContent=s}async function api(url,method='GET',body){const r=await fetch(url,{method,cache:'no-store',headers:{'X-Admin-Token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);return j}
 function render(){const root=$('cards');root.replaceChildren();KEYS.forEach((key,i)=>{const p=data.pairs[key],card=document.createElement('section');card.className='panel';const h=document.createElement('h2');h.textContent=LABELS[i];card.append(h);const f=document.createElement('div');f.className='fields';for(const field of [...BOOLS,...NUMS,'currencyCode']){const l=document.createElement('label');l.textContent=LABEL[field];const inp=document.createElement('input');inp.dataset.pair=key;inp.dataset.field=field;if(BOOLS.includes(field)){inp.type='checkbox';inp.checked=p[field]}else if(NUMS.includes(field)){inp.type='number';inp.step='any';inp.min='0';inp.value=p[field]===null?'':p[field]}else{inp.type='text';inp.maxLength=3;inp.value=p[field]}inp.addEventListener('change',()=>{if(BOOLS.includes(field))p[field]=inp.checked;else if(NUMS.includes(field))p[field]=inp.value.trim()===''?null:Number(inp.value);else p[field]=inp.value.toUpperCase().trim()});l.append(inp);f.append(l)}card.append(f);root.append(card)})}
+
+let igSpecRequestId=0;
+
+function clearIgSpecifications(){
+ igSpecRequestId++;
+ $('ig-specifications').hidden=true;
+ for(const id of ['ig-contract-size','ig-pip-value','ig-min-size',
+                  'ig-min-stop','ig-market-status']){
+  $(id).textContent='Awaiting IG data';
+ }
+ $('ig-spec-status').textContent='Unlock to retrieve IG market specifications.';
+}
+
+async function loadIgSpecifications(){
+ const requestId=++igSpecRequestId;
+ const activeToken=token;
+ $('ig-specifications').hidden=false;
+ $('ig-spec-status').textContent='Retrieving IG DEMO market specifications...';
+
+ try{
+  const spec=await api('/api/admin/market/specifications');
+  if(requestId!==igSpecRequestId||!token||token!==activeToken)return;
+
+  const display=value=>value===null||value===undefined?'Unavailable':String(value);
+  const rule=value=>value&&typeof value==='object'
+   ?display(value.value)+' '+display(value.unit)
+   :display(value);
+
+  $('ig-contract-size').textContent=display(spec.contractSize);
+  $('ig-pip-value').textContent=
+   display(spec.valueOfOnePip)+' (IG-reported)';
+  $('ig-min-size').textContent=rule(spec.minimumDealSize);
+  $('ig-min-stop').textContent=rule(spec.minimumStopDistance);
+  $('ig-market-status').textContent=display(spec.marketStatus);
+  $('ig-spec-status').textContent=
+   'Retrieved: '+display(spec.retrievedAt)+
+   ' — GBP monetary exposure UNVERIFIED. No broker order authorised.';
+ }catch(e){
+  if(requestId!==igSpecRequestId||!token||token!==activeToken)return;
+  $('ig-spec-status').textContent=
+   'Market specifications unavailable: '+e.message+
+   '. Trading remains blocked.';
+ }
+}
+
 function clearGbpOverview(){
+  clearIgSpecifications();
   previewEquity=null;
   $('hypothetical-risk').hidden=true;
   $('preview-result').textContent='No calculation performed.';
@@ -171,6 +267,7 @@ $('preview-calculate').onclick=calculateHypotheticalRisk;
 $('connect').onclick=async()=>{try{token=$('token').value;data=await api('/api/admin/multi/risk');$('editor').hidden=false;$('storage').textContent='Storage: '+data.storageMode+' · Revision: '+data.revision+(data.loadError?' · Load error: '+data.loadError:'');$('save').disabled=!data.durable;render();
 const status=await api('/api/admin/trading/status');
 const valid=showGbpOverview(status.account);
+void loadIgSpecifications();
 message(valid
   ? 'Authenticated. GBP risk budget loaded; trading remains blocked.'
   : 'Authenticated. GBP account equity unavailable; trading remains blocked.',
