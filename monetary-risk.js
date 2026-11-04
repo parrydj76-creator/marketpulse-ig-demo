@@ -58,6 +58,15 @@ function calculateRisk(input) {
     plannedLoss,
     riskPercentage: plannedLoss / equity * 100,
     withinLimit: plannedLoss <= riskBudget,
+    previewOnly: true,
+    monetaryRiskVerified: false,
+    verificationChecks: {
+      brokerContractSize: 'UNVERIFIED',
+      brokerOrderSizeUnits: 'UNVERIFIED',
+      stopDistanceUnits: 'UNVERIFIED',
+      accountCurrencyConversion: 'UNVERIFIED',
+      feesAndSlippage: 'NOT_INCLUDED'
+    },
     approved: false,
     verificationStatus: 'BLOCKED_UNTIL_BROKER_DATA_VERIFIED',
     note: 'Excludes fees, slippage and market gaps'
