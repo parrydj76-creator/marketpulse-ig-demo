@@ -1,13 +1,71 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MarketPulse 6.3.1 — Risk settings</title><style>
 :root{color-scheme:dark}body{margin:0;background:#0a1220;color:#e8f1ff;font:15px system-ui,sans-serif}main{max-width:1150px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.panel{background:#142239;border:1px solid #30425b;border-radius:14px;padding:16px;margin:14px 0}h1{font-size:26px;margin:8px 0}h2{font-size:18px}.muted{color:#aabbd0}label{display:block;font-size:12px;color:#b5c7dc;margin:7px 0}input{box-sizing:border-box;width:100%;border:1px solid #496078;background:#0d182a;color:white;border-radius:7px;padding:10px;font:inherit}input[type=checkbox]{width:auto}button{background:#31c6a5;color:#061c18;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.secondary{background:#304763;color:white}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}.err{color:#ff9b9b;white-space:pre-wrap}.ok{color:#8de9bf}code{overflow-wrap:anywhere}a{color:#87d8ff}.pill{display:inline-block;border:1px solid #b77b50;padding:4px 9px;border-radius:20px;color:#ffc899}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}</style></head><body><main><header><div><h1>MarketPulse <span style="color:#31c6a5">V6.3.1</span> Risk Centre</h1><div class="muted">IG Demo · Seven major forex pairs · Orders disabled in code</div></div><a href="/multi">← Live dashboard</a></header>
 <div class="panel"><strong class="pill">MONITOR-ONLY: NO BROKER ORDERS</strong><p class="muted">Saving settings does not enable trades. A server-side save requires a verified persistent disk. On Render Free, export/import JSON backups instead. The admin token is kept only in this page's memory and is not saved in browser storage.</p><label for="token">Admin token (ADMIN_TOKEN from Render)</label><div class="actions"><input id="token" type="password" autocomplete="off" placeholder="Paste your private admin token" style="max-width:440px"><button id="connect">Unlock settings</button><button id="lock" class="secondary">Lock</button></div><p id="storage" class="muted"></p></div>
+
+<section id="gbp-overview" class="panel" hidden>
+  <h2>GBP Risk Overview — V6.5</h2>
+  <p class="muted">IG Demo account · Read-only monetary-risk monitoring</p>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="muted">Account equity</div>
+      <h2 id="gbp-equity">Awaiting verified account data</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Maximum planned risk (0.5%)</div>
+      <h2 id="gbp-budget">Awaiting equity</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Estimated stop-loss exposure</div>
+      <h2>Unverified</h2>
+    </div>
+
+    <div class="panel">
+      <div class="muted">Broker execution</div>
+      <h2>BLOCKED</h2>
+    </div>
+  </div>
+
+  <p class="err">
+    MONITOR ONLY — Contract sizing, GBP conversion, fees and
+    slippage require further verification. No orders authorised.
+  </p>
+</section>
+
 <div id="editor" hidden><div class="actions"><button id="validate">Validate all seven</button><button id="save">Save to server</button><button id="export" class="secondary">Export JSON backup</button><label style="font-size:14px">Import backup <input type="file" id="import" accept="application/json,.json"></label></div><p id="message" role="status"></p><div id="cards" class="grid"></div></div>
 </main><script>
 const KEYS=['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD'];const LABELS=['EUR/USD','GBP/USD','USD/JPY','USD/CHF','USD/CAD','AUD/USD','NZD/USD'];const NUMS=['size','stopDistance','limitDistance','maxSpread','minScore','minSizeVerified'];const BOOLS=['enabled','unitsVerified','lifecycleVerified'];const LABEL={size:'Deal size (IG contracts)',stopDistance:'Stop distance (IG points)',limitDistance:'Take-profit distance (IG points)',maxSpread:'Max spread (raw price units)',minScore:'Minimum signal score (65–90)',minSizeVerified:'IG verified minimum size',enabled:'Enable this pair in configuration',unitsVerified:'IG stop point units independently verified',lifecycleVerified:'IG demo order lifecycle independently verified',currencyCode:'IG instrument currency code'};
 let token='',data=null;const $=id=>document.getElementById(id);function message(s,error=false){$('message').className=error?'err':'ok';$('message').textContent=s}async function api(url,method='GET',body){const r=await fetch(url,{method,cache:'no-store',headers:{'X-Admin-Token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);return j}
 function render(){const root=$('cards');root.replaceChildren();KEYS.forEach((key,i)=>{const p=data.pairs[key],card=document.createElement('section');card.className='panel';const h=document.createElement('h2');h.textContent=LABELS[i];card.append(h);const f=document.createElement('div');f.className='fields';for(const field of [...BOOLS,...NUMS,'currencyCode']){const l=document.createElement('label');l.textContent=LABEL[field];const inp=document.createElement('input');inp.dataset.pair=key;inp.dataset.field=field;if(BOOLS.includes(field)){inp.type='checkbox';inp.checked=p[field]}else if(NUMS.includes(field)){inp.type='number';inp.step='any';inp.min='0';inp.value=p[field]===null?'':p[field]}else{inp.type='text';inp.maxLength=3;inp.value=p[field]}inp.addEventListener('change',()=>{if(BOOLS.includes(field))p[field]=inp.checked;else if(NUMS.includes(field))p[field]=inp.value.trim()===''?null:Number(inp.value);else p[field]=inp.value.toUpperCase().trim()});l.append(inp);f.append(l)}card.append(f);root.append(card)})}
-$('connect').onclick=async()=>{try{token=$('token').value;data=await api('/api/admin/multi/risk');$('editor').hidden=false;$('storage').textContent='Storage: '+data.storageMode+' · Revision: '+data.revision+(data.loadError?' · Load error: '+data.loadError:'');$('save').disabled=!data.durable;render();message('Authenticated. Settings loaded; no trades can be placed.')}catch(e){token='';message(e.message,true)}};
-$('lock').onclick=()=>{token='';$('token').value='';data=null;$('editor').hidden=true;$('storage').textContent='Locked'};
+function clearGbpOverview(){
+  $('gbp-overview').hidden=true;
+  $('gbp-equity').textContent='Awaiting verified account data';
+  $('gbp-budget').textContent='Awaiting equity';
+}
+function showGbpOverview(account){
+  clearGbpOverview();
+  if(!account || account.currency!=='GBP' ||
+     !Number.isFinite(account.equity) || account.equity<=0){
+    return false;
+  }
+  const gbp=new Intl.NumberFormat('en-GB',{
+    style:'currency',currency:'GBP'
+  });
+  $('gbp-equity').textContent=gbp.format(account.equity);
+  $('gbp-budget').textContent=gbp.format(account.equity*0.005);
+  $('gbp-overview').hidden=false;
+  return true;
+}
+$('connect').onclick=async()=>{try{token=$('token').value;data=await api('/api/admin/multi/risk');$('editor').hidden=false;$('storage').textContent='Storage: '+data.storageMode+' · Revision: '+data.revision+(data.loadError?' · Load error: '+data.loadError:'');$('save').disabled=!data.durable;render();
+const status=await api('/api/admin/trading/status');
+const valid=showGbpOverview(status.account);
+message(valid
+  ? 'Authenticated. GBP risk budget loaded; trading remains blocked.'
+  : 'Authenticated. GBP account equity unavailable; trading remains blocked.',
+  !valid)}catch(e){token='';message(e.message,true)}};
+$('lock').onclick=()=>{clearGbpOverview();token='';$('token').value='';data=null;$('editor').hidden=true;$('storage').textContent='Locked'};
 $('validate').onclick=async()=>{try{const v=await api('/api/admin/multi/risk/validate','POST',{pairs:data.pairs});const all=[...v.global,...Object.entries(v.pairs).flatMap(([k,errs])=>errs.map(x=>k+': '+x))];message(all.length?all.join('\n'):'All fields passed structural validation. IG dealing rules must still be verified independently.',!!all.length)}catch(e){message(e.message,true)}};
 $('save').onclick=async()=>{try{data=await api('/api/admin/multi/risk','PUT',{revision:data.revision,pairs:data.pairs});render();message('Saved to verified persistent storage. Revision '+data.revision)}catch(e){message(e.message,true)}};
 $('export').onclick=()=>{const payload=JSON.stringify({schema:1,pairs:data.pairs},null,2),blob=new Blob([payload],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='marketpulse-risk-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message('JSON backup exported. Store it privately; values are not broker-verified.')};
