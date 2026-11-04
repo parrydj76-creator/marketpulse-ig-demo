@@ -273,9 +273,39 @@ function startRestPolling(){
  pollRest().catch(e=>log('Initial REST poll: '+e.message));
  log(`V5.0 REST fallback enabled: ${REST_POLL_SECONDS}s interval, ${REST_MAX_MARKETS} markets`);
 }
-async function refreshAccount(){const a=await api('/accounts');const ac=(a.accounts||[]).find(x=>x.accountId===auth.accountId)||(a.accounts||[]).find(x=>x.accountType==='CFD');
- if(ac)account={accountId:ac.accountId,currency:ac.currency,balance:ac.balance?.balance,equity:ac.balance?.balance+ac.balance?.profitLoss};
- const p=await api('/positions','GET',null,'2');positions=(p.positions||[]).map(x=>({epic:x.market?.epic,direction:x.position?.direction,size:x.position?.size,dealId:x.position?.dealId}));lastAccountRefresh=new Date().toISOString();}
+async function refreshAccount(){
+ account=null;
+ const a=await api('/accounts');
+ const ac=(a.accounts||[]).find(x=>x.accountId===auth?.accountId);
+ if(!ac||ac.accountType!=='CFD'||ac.currency!=='GBP'){
+  throw Error('IG Demo account verification failed: GBP CFD account required');
+ }
+ const rawBalance=ac.balance?.balance;
+ const rawProfitLoss=ac.balance?.profitLoss;
+ if(rawBalance===null||rawBalance===undefined||
+    rawProfitLoss===null||rawProfitLoss===undefined||
+    typeof rawBalance==='boolean'||typeof rawProfitLoss==='boolean'||
+    String(rawBalance).trim()===''||String(rawProfitLoss).trim()===''){
+  throw Error('IG Demo account verification failed: missing financial values');
+ }
+ const balance=Number(rawBalance);
+ const profitLoss=Number(rawProfitLoss);
+ const equity=balance+profitLoss;
+ if(!Number.isFinite(balance)||balance<=0||
+    !Number.isFinite(profitLoss)||
+    !Number.isFinite(equity)||equity<=0){
+  throw Error('IG Demo account verification failed: invalid balance or equity');
+ }
+ const p=await api('/positions','GET',null,'2');
+ positions=(p.positions||[]).map(x=>({
+  epic:x.market?.epic,
+  direction:x.position?.direction,
+  size:x.position?.size,
+  dealId:x.position?.dealId
+ }));
+ account={accountId:ac.accountId,currency:'GBP',balance,equity};
+ lastAccountRefresh=new Date().toISOString();
+}
 
 // DEMO order execution: IG OTC v2 open, v1 close with _method DELETE; confirm every action.
 // Never retry an ambiguous order, and never send orders unless armed explicitly after boot.
