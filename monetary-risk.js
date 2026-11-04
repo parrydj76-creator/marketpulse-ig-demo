@@ -58,7 +58,8 @@ function calculateRisk(input) {
     plannedLoss,
     riskPercentage: plannedLoss / equity * 100,
     withinLimit: plannedLoss <= riskBudget,
-    approved: plannedLoss <= riskBudget,
+    approved: false,
+    verificationStatus: 'BLOCKED_UNTIL_BROKER_DATA_VERIFIED',
     note: 'Excludes fees, slippage and market gaps'
   };
 }
