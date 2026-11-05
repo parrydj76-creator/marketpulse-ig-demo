@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101923">
-<title>MarketPulse AI V7.2 — Paper Trading</title>
+<title>MarketPulse AI V7.5 — Paper Trading</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#101923;color:#f2f6fa;font:15px system-ui,-apple-system,sans-serif}
@@ -29,6 +29,7 @@ hr{border:0;border-top:1px solid #344657;margin:14px 0}
 .trade small{display:block;margin-top:5px}
 nav{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0}
 a{color:#77e2b1;text-decoration:none}
+button{background:#77e2b1;color:#101923;border:0;border-radius:8px;padding:11px;font-weight:700;cursor:pointer}
 #status{font-size:12px;color:#aebecd;margin-top:12px}
 @media(min-width:650px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 </style>
@@ -37,8 +38,8 @@ a{color:#77e2b1;text-decoration:none}
 <main>
 <header>
 <div>
-<small class="green">MARKETPULSE AI · V7.2</small>
-<h1>Paper Trading</h1>
+<small class="green">MARKETPULSE AI · V7.5</small>
+<h1>Forex Signal Monitor</h1>
 </div>
 <span class="tag">SIMULATION</span>
 </header>
@@ -89,6 +90,14 @@ a{color:#77e2b1;text-decoration:none}
 </section>
 
 <section class="card">
+<h2>Signal explanation & alerts</h2>
+<p id="explanation" class="muted" aria-live="polite">Waiting for signal analysis…</p>
+<p id="warmup" class="muted"></p>
+<button id="alerts" type="button">Enable alerts while this page is open</button>
+<p id="alertstatus" class="muted">Alerts are optional. iPhone background push notifications are not yet supported.</p>
+</section>
+
+<section class="card">
 <h2>Open simulated position</h2>
 <div id="position" class="muted">Loading...</div>
 </section>
@@ -99,12 +108,34 @@ a{color:#77e2b1;text-decoration:none}
 </section>
 
 <p id="status">Connecting...</p>
-<small>Updates every 15 seconds. Pip results are not GBP profit. This dashboard is experimental and is not investment advice.</small>
+<small>Updates every 15 seconds. Pip results are not GBP profit. Alerts work only while this page is open and notifications are permitted. Experimental signals are not investment advice.</small>
 </main>
 
+<script src="/signal-view.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const fmt=(v,d=2)=>Number.isFinite(Number(v))&&v!==null?Number(v).toFixed(d):'—';
+let alertsEnabled=false;
+let lastAlertKey=null;
+const alertButton=$('alerts');
+alertButton.addEventListener('click',async()=>{
+ if(!('Notification' in window)){$('alertstatus').textContent='Browser notifications unavailable. Keep the dashboard open for signals.';return}
+ if(Notification.permission!=='granted'){
+  const permission=await Notification.requestPermission();
+  if(permission!=='granted'){$('alertstatus').textContent='Notification permission not granted.';return}
+ }
+ alertsEnabled=!alertsEnabled;
+ alertButton.textContent=alertsEnabled?'Disable page-open alerts':'Enable alerts while this page is open';
+ $('alertstatus').textContent=alertsEnabled?'Alerts enabled only while this dashboard is open. No background iPhone push.':'Alerts disabled.';
+});
+function maybeAlert(view){
+ const key=MarketPulseSignalView.alertKey(view);
+ if(!key||!alertsEnabled)return;
+ if(key===lastAlertKey)return;
+ lastAlertKey=key;
+ try{new Notification('MarketPulse AI — experimental signal',{body:`EUR/USD ${view.direction} · heuristic score ${view.score}. Not a trade instruction.`})}
+ catch(e){$('alertstatus').textContent='Browser blocked notification: '+e.message}
+}
 function render(data){
  const p=data.paper||{};
  const m=(data.markets||[]).find(x=>x.epic==='CS.D.EURUSD.CFD.IP')||{};
@@ -117,16 +148,20 @@ function render(data){
  $('winrate').textContent=closed.length?fmt(wins/closed.length*100,0)+'%':'—';
  $('completed').textContent=closed.length+' closed trades in available history';
  $('daily').textContent=(p.dailyOpens??'—')+' / '+(p.config?.dailyCap??'—');
- const decision=p.lastDecision||{};
- const feed=data.feedHealth||{};
- const fresh=feed.freshStream===true && decision.freshStream===true && m.priceSource==='STREAM' && m.ageSeconds!==null && m.ageSeconds<20;
- $('signal').textContent=fresh?(decision.direction||'WAIT'):'NO DATA';
- $('signal').className='value '+(fresh&&decision.direction==='LONG'?'green':fresh&&decision.direction==='SHORT'?'red':'yellow');
- $('score').textContent=fresh?'Confidence '+(decision.score??'—')+' · '+(decision.bars??'—')+' bars':'Fresh streamed prices unavailable';
+ const view=MarketPulseSignalView.interpret(data);
+ const fresh=view.fresh;
+ $('signal').textContent=view.direction;
+ $('signal').className='value '+(view.alertable&&view.direction==='LONG'?'green':view.alertable&&view.direction==='SHORT'?'red':'yellow');
+ $('score').textContent=view.direction==='WARMING'?`${view.bars}/30 completed 5-minute bars`:
+   view.alertable?`Heuristic score ${view.score} (not a probability)`:
+   view.direction==='WAIT'?'No qualifying signal':view.reason;
+ $('explanation').textContent=view.reason;
+ $('warmup').textContent=view.direction==='WARMING'?'The system requires 30 consecutive completed five-minute bars (at least 150 minutes of observations). Render restarts may reset candle history.':'';
+ maybeAlert(view);
  $('prices').textContent=fmt(m.bid,5)+' / '+fmt(m.ask,5);
  $('source').textContent=m.priceSource||'Unavailable';
- $('fresh').textContent=feed.freshStream?'Fresh streamed quote ('+(feed.quoteAgeSeconds??'?')+'s old)':'Unavailable or stale';
- $('feedreason').textContent=feed.reason||'Not available';
+ $('fresh').textContent=fresh?'Fresh streamed quote ('+(data.feedHealth?.quoteAgeSeconds??'?')+'s old)':'Unavailable or stale';
+ $('feedreason').textContent=data.feedHealth?.reason||'Not available';
  $('connection').textContent=data.streamStatus||'Unknown';
  const pos=p.position;
  $('position').textContent=pos?pos.direction+' @ '+fmt(pos.entry,5)+' · Opened '+new Date(pos.openedAt).toLocaleString():'No open simulated position';
