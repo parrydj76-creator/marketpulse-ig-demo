@@ -9,6 +9,7 @@ const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
 const {createRiskStore}=require('./risk-store');
+const {createPushAlerts}=require('./push-alerts');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
 const HOST='https://demo-api.ig.com/gateway/deal';
@@ -600,6 +601,10 @@ app.post('/api/admin/multi/reset-stop',requireAdmin,async(req,res)=>{if(!multi)r
 app.post('/api/admin/multi/reconcile',requireAdmin,async(_req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json({positions:await multi.reconcile(),status:multi.status()})}catch(e){res.status(502).json({error:e.message})}});
 setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
 app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','analytics.html')));
+// Register push API before the dashboard fallback.
+const pushAlerts=createPushAlerts();
+pushAlerts.routes(app);
+void pushAlerts.init().catch(e=>console.error('Push init failed:',e.message));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
