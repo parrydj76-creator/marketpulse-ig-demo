@@ -10,6 +10,7 @@ const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
 const {createRiskStore}=require('./risk-store');
 const {createPushAlerts}=require('./push-alerts');
+const {createV9Paper}=require('./v9-paper');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
 const HOST='https://demo-api.ig.com/gateway/deal';
@@ -601,13 +602,24 @@ app.post('/api/admin/multi/reset-stop',requireAdmin,async(req,res)=>{if(!multi)r
 app.post('/api/admin/multi/reconcile',requireAdmin,async(_req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json({positions:await multi.reconcile(),status:multi.status()})}catch(e){res.status(502).json({error:e.message})}});
 setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
 app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','analytics.html')));
-// Register push API before the dashboard fallback.
+// V8: Register the background-push API before the dashboard fallback.
 const pushAlerts=createPushAlerts();
 pushAlerts.routes(app);
-void pushAlerts.init().catch(e=>console.error('Push init failed:',e.message));
+void pushAlerts.init().catch(e=>console.error('[MarketPulse] Push init failed:',e.message));
+// V9 independent simulated engine. Routes must precede dashboard fallback.
+const v9Paper=createV9Paper();
+app.get('/v9',(_req,res)=>res.sendFile(path.join(__dirname,'public','v9.html')));
+v9Paper.routes(app,requireAdmin);
+void v9Paper.init().catch(e=>console.error('[V9 paper] startup:',e.message));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
+// V9 paper-only evaluation; independent of legacy paper recovery and broker execution.
+setInterval(()=>{
+  const epic='CS.D.EURUSD.CFD.IP';
+  v9Paper.tick(quotes.get(epic),analyse(epic),candles.get(epic)||[]).catch(e=>log('V9 paper tick: '+e.message));
+},15000);
+
 let paperCycleBusy=false;
 setInterval(async()=>{
   if(!paperRecoveryReady || paperCycleBusy)return;
