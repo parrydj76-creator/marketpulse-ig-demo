@@ -3,6 +3,7 @@ require('dotenv').config();
 const express=require('express'), path=require('path'), fs=require('fs');
 const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
 const {PaperEngine}=require('./paper-engine');
+const {PaperArchiver}=require('./paper-archiver');
 const {createRiskStore}=require('./risk-store');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
@@ -72,6 +73,7 @@ function recordTrade(kind,details){trade.lastAction={time:new Date().toISOString
 const restState={enabled:true,intervalSeconds:REST_POLL_SECONDS,requestedMarkets:REST_MAX_MARKETS,lastPoll:null,nextPoll:null,lastError:'',rateLimitedUntil:null,attempted:0,succeeded:0,failed:0,marketResults:{}};
 let restPolling=false,restTimer=null,restBackoffUntil=0;
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
+const paperArchiver=new PaperArchiver();
 const paper=new PaperEngine({epic:'CS.D.EURUSD.CFD.IP',dailyCap:2,stopPips:12,targetPips:18,maxSpreadPips:2,holdMinutes:180,cooldownMinutes:30,minScore:70});
 let accepted=new Set(),diagnostics=new Map();
 let probeStartedAt=null,restSnapshot=null,restSnapshotError="",restSnapshotAt=null;
@@ -530,7 +532,13 @@ app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','anal
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
-setInterval(()=>{try{const q=quotes.get('CS.D.EURUSD.CFD.IP');const s=analyse('CS.D.EURUSD.CFD.IP');paper.tick(q,s,Date.now())}catch(e){log('Paper cycle: '+e.message)}},15000);
+setInterval(()=>{try{const q=quotes.get('CS.D.EURUSD.CFD.IP');const s=analyse('CS.D.EURUSD.CFD.IP');const previousEvent=paper.history[0];
+paper.tick(q,s,Date.now());
+const latestEvent=paper.history[0];
+if(latestEvent && latestEvent!==previousEvent){
+  paperArchiver.enqueue([latestEvent]);
+}
+void paperArchiver.flush().catch(e=>log('Paper archive: '+e.message))}catch(e){log('Paper cycle: '+e.message)}},15000);
 
 let autoStartChecking=false;
 async function tryAutoStart(){
