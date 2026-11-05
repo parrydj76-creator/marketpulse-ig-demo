@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101923">
-<title>MarketPulse AI V7.5 — Paper Trading</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>MarketPulse AI V8.0 — Paper Trading</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#101923;color:#f2f6fa;font:15px system-ui,-apple-system,sans-serif}
@@ -38,7 +40,7 @@ button{background:#77e2b1;color:#101923;border:0;border-radius:8px;padding:11px;
 <main>
 <header>
 <div>
-<small class="green">MARKETPULSE AI · V7.5</small>
+<small class="green">MARKETPULSE AI · V8.0</small>
 <h1>Forex Signal Monitor</h1>
 </div>
 <span class="tag">SIMULATION</span>
@@ -98,6 +100,15 @@ button{background:#77e2b1;color:#101923;border:0;border-radius:8px;padding:11px;
 </section>
 
 <section class="card">
+<h2>iPhone background push · v8.0</h2>
+<p class="muted">On iPhone: Safari → Share → Add to Home Screen → open the installed app. Background push requires iOS 16.4+ and permission.</p>
+<input id="pairing" type="password" placeholder="Your push pairing token" autocomplete="off" style="width:100%;max-width:340px;padding:12px;margin-bottom:10px;border-radius:8px;background:#101923;color:white;border:1px solid #344657">
+<button type="button" id="pushon">Enable iPhone push</button> <button type="button" id="pushoff">Disable push</button>
+<p id="pushstatus" class="muted">Checking push service…</p>
+<button type="button" id="showhistory">Load signal history</button>
+<div id="signalhistory" class="muted"></div>
+</section>
+<section class="card">
 <h2>Open simulated position</h2>
 <div id="position" class="muted">Loading...</div>
 </section>
@@ -108,10 +119,11 @@ button{background:#77e2b1;color:#101923;border:0;border-radius:8px;padding:11px;
 </section>
 
 <p id="status">Connecting...</p>
-<small>Updates every 15 seconds. Pip results are not GBP profit. Alerts work only while this page is open and notifications are permitted. Experimental signals are not investment advice.</small>
+<small>Updates every 15 seconds. Pip results are not GBP profit. Page-open alerts require an open tab; separately enabled Home Screen push can work in the background. Experimental signals are not investment advice.</small>
 </main>
 
 <script src="/signal-view.js"></script>
+<script src="/push-ui.js" defer></script>
 <script>
 const $=id=>document.getElementById(id);
 const fmt=(v,d=2)=>Number.isFinite(Number(v))&&v!==null?Number(v).toFixed(d):'—';
