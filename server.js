@@ -526,6 +526,7 @@ app.post('/api/admin/multi/stop',requireAdmin,(_req,res)=>res.json(multi?multi.s
 app.post('/api/admin/multi/reset-stop',requireAdmin,async(req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json(await multi.resetOperatorStop(req.body?.confirm))}catch(e){res.status(409).json({error:e.message})}});
 app.post('/api/admin/multi/reconcile',requireAdmin,async(_req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json({positions:await multi.reconcile(),status:multi.status()})}catch(e){res.status(502).json({error:e.message})}});
 setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
+app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','analytics.html')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
