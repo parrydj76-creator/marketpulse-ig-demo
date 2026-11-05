@@ -15,6 +15,26 @@
   try{await request('/api/push/subscribe',{method:'POST',headers:auth(),body:JSON.stringify(sub)})}catch(e){await sub.unsubscribe();throw e}
   status.textContent='Background push subscription saved. Delivery awaits a new qualifying signal.';
  }catch(e){status.textContent='Push setup: '+e.message}});
+ // Add a test button next to the existing notification controls.
+ const pushOn=$('pushon');
+ if(pushOn){
+  const testButton=document.createElement('button');
+  testButton.type='button';
+  testButton.id='pushtest';
+  testButton.textContent='Send Test Notification';
+  testButton.style.margin='8px';
+  pushOn.insertAdjacentElement('afterend',testButton);
+  testButton.addEventListener('click',async()=>{
+   testButton.disabled=true;
+   try{
+    if(!key())throw Error('Enter your push pairing token');
+    status.textContent='Sending test notification…';
+    const result=await request('/api/push/test',{method:'POST',headers:auth(),body:'{}'});
+    status.textContent='Push provider accepted '+result.accepted+' test notification(s). Check your iPhone; delivery is not guaranteed.';
+   }catch(e){status.textContent='Test notification: '+e.message;}
+   finally{testButton.disabled=false;}
+  });
+ }
  $('pushoff').addEventListener('click',async()=>{try{if(!key())throw Error('Enter your push pairing token');const reg=await navigator.serviceWorker.getRegistration('/sw.js');const sub=await reg?.pushManager.getSubscription();if(sub){await request('/api/push/unsubscribe',{method:'POST',headers:auth(),body:JSON.stringify({endpoint:sub.endpoint})});await sub.unsubscribe()}status.textContent='Push disabled on this device.'}catch(e){status.textContent='Push disable: '+e.message}});
  $('showhistory').addEventListener('click',async()=>{try{if(!key())throw Error('Enter your push pairing token');const d=await request('/api/push/history',{headers:auth()});const target=$('signalhistory');target.replaceChildren();if(!d.events.length){target.textContent='No qualifying signals recorded yet.';return}for(const e of d.events){const p=document.createElement('p');p.textContent=new Date(e.bar_time).toLocaleString()+' · '+e.direction+' · heuristic score '+e.score;target.append(p)}}catch(e){$('signalhistory').textContent='History: '+e.message}});
  request('/api/push/status').then(d=>{status.textContent=d.ready?'Push server ready. Enter pairing token to enable.':'Push not configured: '+(d.error||'check Render settings')}).catch(()=>{status.textContent='Push server unavailable'});
