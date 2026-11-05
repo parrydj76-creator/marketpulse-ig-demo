@@ -52,6 +52,17 @@ function createPushAlerts(){
   const subs=await pool.query('SELECT endpoint_hash,subscription FROM mp_push_subscriptions LIMIT 100');
   for(const sub of subs.rows){try{await webpush.sendNotification(sub.subscription,JSON.stringify({title:'MarketPulse AI · '+view.direction,body:'EUR/USD experimental signal · score '+view.score+' · not a trade instruction',url:'/'}),{TTL:180,urgency:'normal'})}catch(e){if(e.statusCode===404||e.statusCode===410)await pool.query('DELETE FROM mp_push_subscriptions WHERE endpoint_hash=$1',[sub.endpoint_hash]);else console.error('Push delivery failed:',e.statusCode||e.message)}}
  }catch(e){console.error('Push monitor error:',e.message)}finally{busy=false}}
- return {init,routes,tick};
+ async function sendPaperEvent(event){
+  if(!ready)return {accepted:0,reason:'Push unavailable'};
+  if(!event||!['OPEN','CLOSE'].includes(event.kind)||!Number.isInteger(event.sequence))return {accepted:0,reason:'Invalid event'};
+  const direction=event.kind==='OPEN'?event.direction:event.position?.direction;
+  const title='MarketPulse AI · PAPER '+event.kind;
+  const body=event.kind==='OPEN'?'Simulated EUR/USD '+direction+' position opened · no broker order':'Simulated EUR/USD '+direction+' position closed ('+event.reason+') · P/L £'+Number(event.pnl).toFixed(2);
+  const rows=await pool.query('SELECT endpoint_hash,subscription FROM mp_push_subscriptions LIMIT 100');
+  let accepted=0;
+  for(const row of rows.rows){try{await webpush.sendNotification(row.subscription,JSON.stringify({title,body,url:'/v9'}),{TTL:180,urgency:'normal'});accepted++}catch(e){if(e.statusCode===404||e.statusCode===410)await pool.query('DELETE FROM mp_push_subscriptions WHERE endpoint_hash=$1',[row.endpoint_hash]);else console.error('Paper event push error:',e.statusCode||e.message)}}
+  return {accepted};
+ }
+ return {init,routes,tick,sendPaperEvent};
 }
 module.exports={createPushAlerts,validSubscription,safeToken};

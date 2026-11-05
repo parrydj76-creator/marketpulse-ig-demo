@@ -607,7 +607,7 @@ const pushAlerts=createPushAlerts();
 pushAlerts.routes(app);
 void pushAlerts.init().catch(e=>console.error('[MarketPulse] Push init failed:',e.message));
 // V9 independent simulated engine. Routes must precede dashboard fallback.
-const v9Paper=createV9Paper();
+const v9Paper=createV9Paper(event=>pushAlerts.sendPaperEvent(event));
 app.get('/v9',(_req,res)=>res.sendFile(path.join(__dirname,'public','v9.html')));
 v9Paper.routes(app,requireAdmin);
 void v9Paper.init().catch(e=>console.error('[V9 paper] startup:',e.message));
