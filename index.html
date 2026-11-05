@@ -1,1 +1,168 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MarketPulse AI V5.6 — Paper</title><style>body{font:16px system-ui;background:#101923;color:#f2f6fa;margin:0;padding:20px}main{max-width:720px;margin:auto}section{background:#1b2a39;border-radius:14px;padding:18px;margin:14px 0}h1{font-size:24px}.muted{color:#aebecd}.warn{color:#ffcc7a}pre{white-space:pre-wrap;overflow-wrap:anywhere}b{color:#77e2b1}</style><main><h1>MarketPulse AI <b>V5.6</b></h1><p class="warn">PAPER TRADING ONLY · No IG orders · Render Free can sleep and reset results</p><section><h2>Live signal</h2><div id="signal">Loading…</div></section><section><h2>Simulated position</h2><div id="position">Loading…</div></section><section><h2>Paper performance</h2><div id="perf">Loading…</div></section><section><h2>Recent simulated activity</h2><pre id="history">Loading…</pre></section><p class="muted">Updates every 15 seconds. Data is volatile. Not investment advice.</p></main><script>async function load(){try{let r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);let d=await r.json(),m=d.markets?.find(x=>x.epic==='CS.D.EURUSD.CFD.IP'),p=d.paper||{};document.querySelector('#signal').textContent=`${m?.direction||'WAIT'} | score ${m?.score||0} | ${m?.bars||0}/30 bars | ${m?.priceSource||'NO FEED'} | bid ${m?.bid??'-'} / ask ${m?.ask??'-'}`;document.querySelector('#position').textContent=p.position?`${p.position.direction} @ ${p.position.entry} (${p.position.openedAt})`:'None';document.querySelector('#perf').textContent=`Simulated realized: ${p.realizedPips??0} pips | Entries today: ${p.dailyOpens??0}/${p.config?.dailyCap??2}`;document.querySelector('#history').textContent=(p.history||[]).slice(0,12).map(x=>JSON.stringify(x)).join('\n')||'No simulated trades yet';}catch(e){document.querySelector('#signal').textContent='Connection error: '+e.message}}load();setInterval(load,15000)</script></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101923">
+<title>MarketPulse AI V7.2 — Paper Trading</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101923;color:#f2f6fa;font:15px system-ui,-apple-system,sans-serif}
+main{max-width:900px;margin:auto;padding:20px 15px 45px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{font-size:25px;margin:5px 0}
+h2{font-size:17px;margin:0 0 15px}
+small,.muted{color:#aebecd}
+.green{color:#77e2b1}.red{color:#ff8585}.yellow{color:#ffcc7a}
+.tag{padding:7px 10px;border-radius:20px;background:#253c43;color:#77e2b1;font-size:12px}
+.notice{background:#493920;color:#ffdf9c;padding:12px;border-radius:10px;margin:18px 0;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{background:#1b2a39;border-radius:15px;padding:18px;margin:12px 0;min-width:0}
+.grid .card{margin:0}
+.label{color:#aebecd;font-size:12px}
+.value{font-size:26px;font-weight:750;margin-top:8px;overflow-wrap:anywhere}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center}
+hr{border:0;border-top:1px solid #344657;margin:14px 0}
+.trade{padding:12px 0;border-bottom:1px solid #344657}
+.trade:last-child{border:0}
+.trade .row{align-items:flex-start}
+.trade small{display:block;margin-top:5px}
+nav{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0}
+a{color:#77e2b1;text-decoration:none}
+#status{font-size:12px;color:#aebecd;margin-top:12px}
+@media(min-width:650px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div>
+<small class="green">MARKETPULSE AI · V7.2</small>
+<h1>Paper Trading</h1>
+</div>
+<span class="tag">SIMULATION</span>
+</header>
+
+<p class="notice">PAPER TRADING ONLY · No broker orders. Results are simulated, exclude some execution costs, and require durable recovery checks after restarts.</p>
+
+<nav>
+<a href="/risk">Risk Centre</a>
+<a href="/analytics">Performance Analytics</a>
+<a href="/multi">Multi-market</a>
+<a href="/control">Controls</a>
+</nav>
+
+<div class="grid">
+<section class="card">
+<div class="label">Simulated P/L</div>
+<div class="value" id="pnl">—</div>
+<small>Realised pips</small>
+</section>
+<section class="card">
+<div class="label">Win rate</div>
+<div class="value" id="winrate">—</div>
+<small id="completed">0 closed trades</small>
+</section>
+<section class="card">
+<div class="label">Trades today</div>
+<div class="value" id="daily">—</div>
+<small>Daily simulation limit</small>
+</section>
+<section class="card">
+<div class="label">Current signal</div>
+<div class="value" id="signal">—</div>
+<small id="score">Waiting for market data</small>
+</section>
+</div>
+
+<section class="card">
+<h2>EUR/USD Market</h2>
+<div class="row"><span class="muted">Bid / Ask</span><strong id="prices">—</strong></div>
+<hr>
+<div class="row"><span class="muted">Data source</span><strong id="source">—</strong></div>
+<hr>
+<div class="row"><span class="muted">Stream freshness</span><strong id="fresh">—</strong></div>
+<hr>
+<div class="row"><span class="muted">Feed diagnosis</span><strong id="feedreason">—</strong></div>
+<hr>
+<div class="row"><span class="muted">Stream connection</span><strong id="connection">—</strong></div>
+</section>
+
+<section class="card">
+<h2>Open simulated position</h2>
+<div id="position" class="muted">Loading...</div>
+</section>
+
+<section class="card">
+<h2>Recent simulated trades</h2>
+<div id="history" class="muted">Loading...</div>
+</section>
+
+<p id="status">Connecting...</p>
+<small>Updates every 15 seconds. Pip results are not GBP profit. This dashboard is experimental and is not investment advice.</small>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmt=(v,d=2)=>Number.isFinite(Number(v))&&v!==null?Number(v).toFixed(d):'—';
+function render(data){
+ const p=data.paper||{};
+ const m=(data.markets||[]).find(x=>x.epic==='CS.D.EURUSD.CFD.IP')||{};
+ const history=Array.isArray(p.history)?p.history:[];
+ const closed=history.filter(x=>x.kind==='CLOSE'&&Number.isFinite(x.pnlPips));
+ const wins=closed.filter(x=>x.pnlPips>0).length;
+ const pnl=Number(p.realizedPips);
+ $('pnl').textContent=Number.isFinite(pnl)?(pnl>0?'+':'')+fmt(pnl,1)+' pips':'—';
+ $('pnl').className='value '+(pnl>0?'green':pnl<0?'red':'');
+ $('winrate').textContent=closed.length?fmt(wins/closed.length*100,0)+'%':'—';
+ $('completed').textContent=closed.length+' closed trades in available history';
+ $('daily').textContent=(p.dailyOpens??'—')+' / '+(p.config?.dailyCap??'—');
+ const decision=p.lastDecision||{};
+ const feed=data.feedHealth||{};
+ const fresh=feed.freshStream===true && decision.freshStream===true && m.priceSource==='STREAM' && m.ageSeconds!==null && m.ageSeconds<20;
+ $('signal').textContent=fresh?(decision.direction||'WAIT'):'NO DATA';
+ $('signal').className='value '+(fresh&&decision.direction==='LONG'?'green':fresh&&decision.direction==='SHORT'?'red':'yellow');
+ $('score').textContent=fresh?'Confidence '+(decision.score??'—')+' · '+(decision.bars??'—')+' bars':'Fresh streamed prices unavailable';
+ $('prices').textContent=fmt(m.bid,5)+' / '+fmt(m.ask,5);
+ $('source').textContent=m.priceSource||'Unavailable';
+ $('fresh').textContent=feed.freshStream?'Fresh streamed quote ('+(feed.quoteAgeSeconds??'?')+'s old)':'Unavailable or stale';
+ $('feedreason').textContent=feed.reason||'Not available';
+ $('connection').textContent=data.streamStatus||'Unknown';
+ const pos=p.position;
+ $('position').textContent=pos?pos.direction+' @ '+fmt(pos.entry,5)+' · Opened '+new Date(pos.openedAt).toLocaleString():'No open simulated position';
+ $('history').replaceChildren();
+ const closes=history.filter(x=>x.kind==='CLOSE').slice(0,12);
+ if(!closes.length){$('history').textContent='No completed simulated trades yet.'}
+ for(const t of closes){
+  const div=document.createElement('div');div.className='trade';
+  const row=document.createElement('div');row.className='row';
+  const name=document.createElement('strong');name.textContent=t.direction+' · '+t.reason;
+  const result=document.createElement('strong');
+  const v=Number(t.pnlPips);
+  result.textContent=Number.isFinite(v)?(v>0?'+':'')+fmt(v,1)+' pips':'—';
+  result.className=v>0?'green':v<0?'red':'';
+  row.append(name,result);
+  const detail=document.createElement('small');
+  detail.textContent=fmt(t.entry,5)+' → '+fmt(t.exit,5)+' · '+new Date(t.at).toLocaleString();
+  div.append(row,detail);$('history').append(div);
+ }
+ $('status').textContent='Last refreshed: '+new Date().toLocaleTimeString()+' · Simulation only · Session started '+(p.startedAt||'unknown');
+}
+async function load(){
+ try{
+  const r=await fetch('/api/state',{cache:'no-store'});
+  if(!r.ok)throw Error('HTTP '+r.status);
+  render(await r.json());
+ }catch(e){
+  $('status').textContent='Connection error: '+e.message;
+  $('signal').textContent='NO DATA';
+  $('fresh').textContent='Unavailable';
+ $('feedreason').textContent='Dashboard request failed';
+ $('connection').textContent='Unknown';
+ }
+}
+load();
+setInterval(load,15000);
+</script>
+</body>
+</html>

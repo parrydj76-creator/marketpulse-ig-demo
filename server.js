@@ -3,6 +3,8 @@ require('dotenv').config();
 const express=require('express'), path=require('path'), fs=require('fs');
 const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
 const {PaperEngine}=require('./paper-engine');
+const {summarizeFeed,feedFresh}=require('./feed-health');
+const APP_VERSION='7.2.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -411,7 +413,7 @@ app.get('/api/paper/analytics',async(_req,res)=>{
   const snapshot=paper.snapshot();
   const history=await getPaperEvents(10000);
   res.json({
-   version:'6.8.0',
+   version:APP_VERSION,
    simulationOnly:true,
    ephemeral:false,
    warning:'Historical simulated events are stored in PostgreSQL. Open positions and pending writes are not yet restart-safe. P/L is simulated pips, not GBP.',
@@ -429,14 +431,23 @@ app.get('/api/paper/analytics',async(_req,res)=>{
 });
 app.get('/api/paper/recovery',(_req,res)=>{
  res.json({
-  version:'6.9.0',
+  version:APP_VERSION,
   simulationOnly:true,
   tradingReady:paperRecoveryReady,
   recovery:paperRecoveryStatus,
   note:'Paper trading remains paused until recovery is verified. IG broker orders remain blocked.'
  });
 });
-app.get('/api/paper',(_req,res)=>res.json({version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
+app.get('/api/feed/health',(_req,res)=>{
+ const epic='CS.D.EURUSD.CFD.IP';
+ const q=quotes.get(epic);
+ const diag=diagnostics.get(epic+'|pricing');
+ res.set('Cache-Control','no-store');
+ res.json({version:APP_VERSION,simulationOnly:true,epic,streamStatus,hasStreamError:Boolean(streamError),lastConnected,
+  ...summarizeFeed({quote:q,diagnostic:diag,now:Date.now(),streamStatus,restState,restSnapshotError}),
+  note:'Diagnostics only. A fresh quote does not authorise paper or broker trading.'});
+});
+app.get('/api/paper',(_req,res)=>res.json({version:APP_VERSION,mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
 app.post('/api/admin/paper/reset',requireAdmin,(_req,res)=>{
   return res.status(409).json({
     ok:false,
@@ -444,9 +455,9 @@ app.post('/api/admin/paper/reset',requireAdmin,(_req,res)=>{
     error:'Paper reset disabled until durable recovery and reset reconciliation are implemented'
   });
 });
-app.get('/api/health',(req,res)=>res.json({ok:true,version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
+app.get('/api/health',(req,res)=>res.json({ok:true,version:APP_VERSION,mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
 app.get('/api/state',(req,res)=>{const now=Date.now(),list=[...markets.values()].map(m=>{const q=quotes.get(m.epic),s=analyse(m.epic);return {...m,...s,streaming:Boolean(q&&now-q.at<(q.source==='REST'?REST_STALE_MS:20000)),bid:q?.bid??null,ask:q?.ask??null,spread:q?.spread??null,marketState:q?.marketState||'UNKNOWN',lastTick:q?new Date(q.at).toISOString():null,ageSeconds:q?Math.round((now-q.at)/1000):null,priceSource:q?.source==='REST'?'REST_POLLING':q?.source||null,igUpdateTime:q?.igUpdateTime||null}});
- res.json({version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',auto:trade.armed,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION,paper:paper.snapshot(),storage:{persistentConfirmed:PERSISTENT_STORAGE,ephemeral:!PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,oracleVm:false,healthy:persistenceHealthy,brokerReconciled,dir:DATA_DIR},orderExecutionEnabled:trade.executionEnabled,executionReadiness:{manualTestQuoteReady:manualDemoQuoteReady(),demoLifecycleVerified:DEMO_EXECUTION_TESTED,brokerEnabled:BROKER_DEMO_EXECUTION,storageConfirmed:PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,persistenceHealthy,brokerReconciled,configValid:tradingConfigValid(),pendingOrder:!!trade.pendingOrder,operatorStop:trade.operatorStop,streamReady:streamTradeReady()},trading:tradePublic(),streamStatus,streamError,lastConnected,account:null,positions:[],lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.priceSource==='STREAM'&&x.lastTick&&x.ageSeconds<20).length,restReceivingCount:list.filter(x=>x.priceSource==='REST_POLLING'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries([...diagnostics].map(([k,v])=>[k,{...v,item:v.item?.replace(/PRICE:[^:]+:/,'PRICE:[REDACTED]:')}])),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'IG DEMO ONLY. Ephemeral mode is best effort; restart can erase trade history and daily caps. Requires verified dealing rules, broker reconciliation, live stream and operator enablement.'})});
+ res.set('Cache-Control','no-store');res.json({version:APP_VERSION,feedHealth:summarizeFeed({quote:quotes.get('CS.D.EURUSD.CFD.IP'),diagnostic:diagnostics.get('CS.D.EURUSD.CFD.IP|pricing'),now,streamStatus,restState,restSnapshotError}),mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',auto:trade.armed,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION,paper:paper.snapshot(),storage:{persistentConfirmed:PERSISTENT_STORAGE,ephemeral:!PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,oracleVm:false,healthy:persistenceHealthy,brokerReconciled,dir:DATA_DIR},orderExecutionEnabled:trade.executionEnabled,executionReadiness:{manualTestQuoteReady:manualDemoQuoteReady(),demoLifecycleVerified:DEMO_EXECUTION_TESTED,brokerEnabled:BROKER_DEMO_EXECUTION,storageConfirmed:PERSISTENT_STORAGE,ephemeralDemoOptIn:EPHEMERAL_DEMO,persistenceHealthy,brokerReconciled,configValid:tradingConfigValid(),pendingOrder:!!trade.pendingOrder,operatorStop:trade.operatorStop,streamReady:streamTradeReady()},trading:tradePublic(),streamStatus,streamError,lastConnected,account:null,positions:[],lastAccountRefresh,lastDiscovery,discoverError,marketCount:markets.size,subscribedCount:[...accepted].filter(x=>!x.startsWith('ACCOUNT|')).length,priceReceivingCount:list.filter(x=>x.priceSource==='STREAM'&&x.lastTick&&x.ageSeconds<20).length,restReceivingCount:list.filter(x=>x.priceSource==='REST_POLLING'&&x.ageSeconds<REST_STALE_MS/1000).length,restFallback:restState,diagnostics:Object.fromEntries([...diagnostics].map(([k,v])=>[k,{...v,item:v.item?.replace(/PRICE:[^:]+:/,'PRICE:[REDACTED]:')}])),probeStartedAt,restSnapshot,restSnapshotError,restSnapshotAt,testOneForex:TEST_ONE,streamCap:MAX,markets:list,activity:events.slice(0,30),note:'IG DEMO ONLY. Ephemeral mode is best effort; restart can erase trade history and daily caps. Requires verified dealing rules, broker reconciliation, live stream and operator enablement.'})});
 app.get('/api/ig/test',requireAdmin,async(req,res)=>{try{const a=await api('/accounts');res.json({ok:true,accountsReturned:a.accounts?.length||0,note:'No orders placed. Restart stream using admin reconnect if necessary.'})}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/admin/reconnect',requireAdmin,async(req,res)=>{await init();res.json({ok:true,streamStatus,streamError})});
 app.post('/api/admin/refresh',requireAdmin,async(req,res)=>{try{await refreshAccount();res.json({ok:true,account,positions})}catch(e){res.status(502).json({error:e.message})}});

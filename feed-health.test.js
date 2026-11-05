@@ -1,0 +1,11 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {feedFresh,summarizeFeed}=require('../feed-health');
+const now=100000;
+const q={source:'STREAM',at:now-1000,bid:1.1,ask:1.1002,marketState:'DEAL',delayed:'0'};
+test('fresh valid stream is detected',()=>assert.equal(feedFresh(q,now),true));
+test('stale stream and REST snapshots are not fresh streams',()=>{assert.equal(feedFresh({...q,at:now-21000},now),false);assert.equal(feedFresh({...q,source:'REST'},now),false)});
+test('invalid prices and future timestamps are rejected',()=>{assert.equal(feedFresh({...q,ask:1},now),false);assert.equal(feedFresh({...q,at:now+1000},now),false)});
+test('diagnostic reports subscription accepted without quotes',()=>{const d=summarizeFeed({now,streamStatus:'CONNECTED:WS-STREAMING',diagnostic:{subscribed:true,updates:0,validQuotes:0}});assert.equal(d.reason,'Subscribed; waiting for first update');assert.equal(d.freshStream,false)});
+test('diagnostic reports stale REST fallback without calling it live',()=>{const d=summarizeFeed({now,quote:{...q,source:'REST'},diagnostic:{subscribed:true}});assert.equal(d.freshStream,false);assert.match(d.reason,/REST snapshot/)});
