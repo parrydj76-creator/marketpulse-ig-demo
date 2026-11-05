@@ -426,6 +426,15 @@ app.get('/api/paper/analytics',async(_req,res)=>{
   });
  }
 });
+app.get('/api/paper/recovery',(_req,res)=>{
+ res.json({
+  version:'6.9.0',
+  simulationOnly:true,
+  tradingReady:paperRecoveryReady,
+  recovery:paperRecoveryStatus,
+  note:'Paper trading remains paused until recovery is verified. IG broker orders remain blocked.'
+ });
+});
 app.get('/api/paper',(_req,res)=>res.json({version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
 app.post('/api/admin/paper/reset',requireAdmin,(req,res)=>{if(req.body?.confirm!=='RESET_PAPER')return res.status(400).json({error:'Confirm RESET_PAPER'});paper.reset();res.json({ok:true,...paper.snapshot()})});
 app.get('/api/health',(req,res)=>res.json({ok:true,version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
