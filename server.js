@@ -368,6 +368,18 @@ async function tradingCycle(){if(trade.pendingOrder)return;if(!BROKER_DEMO_EXECU
 
 async function init(){if(starting)return;starting=true;brokerReconciled=false;disarm('Reconnect requires re-arming');try{closeStream();await login();await discover();await refreshAccount();const brokerPositions=await reconcilePositions();brokerReconciled=true;if(brokerPositions.length||trade.tracked)log('Broker reconciliation: '+brokerPositions.length+' open position(s), bot tracked='+Boolean(trade.tracked));await checkRestSnapshot();startStream();startRestPolling()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});const supplied=req.get('X-Admin-Token')||'';const crypto=require('crypto');const a=Buffer.from(supplied),b=Buffer.from(token);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(403).json({error:'Invalid admin token'});next()}
+app.get('/api/paper/analytics',(_req,res)=>{
+ const {calculatePaperAnalytics}=require('./paper-analytics');
+ const snapshot=paper.snapshot();
+ res.json({
+  version:'6.7.0',
+  simulationOnly:true,
+  ephemeral:snapshot.ephemeral,
+  warning:snapshot.warning,
+  startedAt:snapshot.startedAt,
+  analytics:calculatePaperAnalytics(paper.history)
+ });
+});
 app.get('/api/paper',(_req,res)=>res.json({version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',...paper.snapshot()}));
 app.post('/api/admin/paper/reset',requireAdmin,(req,res)=>{if(req.body?.confirm!=='RESET_PAPER')return res.status(400).json({error:'Confirm RESET_PAPER'});paper.reset();res.json({ok:true,...paper.snapshot()})});
 app.get('/api/health',(req,res)=>res.json({ok:true,version:'6.5.0',mode:'IG_DEMO_RENDER_FREE_EXPERIMENTAL',streamStatus,marketCount:markets.size,brokerDemoExecutionEnabled:BROKER_DEMO_EXECUTION}));
