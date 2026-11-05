@@ -611,6 +611,8 @@ const v9Paper=createV9Paper(event=>pushAlerts.sendPaperEvent(event));
 app.get('/v9',(_req,res)=>res.sendFile(path.join(__dirname,'public','v9.html')));
 v9Paper.routes(app,requireAdmin);
 void v9Paper.init().catch(e=>console.error('[V9 paper] startup:',e.message));
+// V10 read-only broker readiness and simulation risk audit. No IG dealing endpoints.
+require('./v10-readiness').registerV10(app,requireAdmin,{v9Paper,api,accountSnapshot:()=>account});
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
