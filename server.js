@@ -5,6 +5,7 @@ const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
 const {PaperEngine}=require('./paper-engine');
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
+const {inspectPaperRecovery}=require('./paper-recovery');
 const {createRiskStore}=require('./risk-store');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
@@ -75,6 +76,38 @@ const restState={enabled:true,intervalSeconds:REST_POLL_SECONDS,requestedMarkets
 let restPolling=false,restTimer=null,restBackoffUntil=0;
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
 const paperArchiver=new PaperArchiver();
+// Fail closed until archived paper trading state has been checked.
+let paperRecoveryReady=false;
+let paperRecoveryStatus={state:'NOT_CHECKED'};
+
+async function recoverPaperOnStartup(){
+  paperRecoveryReady=false;
+  paperRecoveryStatus={state:'CHECKING'};
+
+  try{
+    const result=await inspectPaperRecovery();
+
+    paperRecoveryStatus={
+      state:result.safeToResume?'INSPECTED':'BLOCKED',
+      ...result
+    };
+
+    // Remain paused until full state restoration is implemented.
+    // Inspection alone does not make resuming safe.
+    paperRecoveryReady=false;
+
+    log('Paper recovery: '+paperRecoveryStatus.state+
+        ', archived events='+result.archivedEvents);
+
+  }catch(e){
+    paperRecoveryReady=false;
+    paperRecoveryStatus={
+      state:'ERROR',
+      error:e.message
+    };
+    log('Paper recovery failed: '+e.message);
+  }
+}
 const paper=new PaperEngine({epic:'CS.D.EURUSD.CFD.IP',dailyCap:2,stopPips:12,targetPips:18,maxSpreadPips:2,holdMinutes:180,cooldownMinutes:30,minScore:70});
 let accepted=new Set(),diagnostics=new Map();
 let probeStartedAt=null,restSnapshot=null,restSnapshotError="",restSnapshotAt=null;
@@ -541,9 +574,13 @@ app.post('/api/admin/multi/reconcile',requireAdmin,async(_req,res)=>{if(!multi)r
 setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
 app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','analytics.html')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));init()});
+const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
-setInterval(()=>{try{const q=quotes.get('CS.D.EURUSD.CFD.IP');const s=analyse('CS.D.EURUSD.CFD.IP');const previousEvent=paper.history[0];
+setInterval(()=>{try{
+if(!paperRecoveryReady){
+  return;
+}
+const q=quotes.get('CS.D.EURUSD.CFD.IP');const s=analyse('CS.D.EURUSD.CFD.IP');const previousEvent=paper.history[0];
 paper.tick(q,s,Date.now());
 const latestEvent=paper.history[0];
 if(latestEvent && latestEvent!==previousEvent){
