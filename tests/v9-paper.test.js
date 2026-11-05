@@ -1,0 +1,14 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');
+const {CONFIG,validMarket,evaluate}=require('../v9-paper');
+const now=Date.parse('2026-11-05T12:05:10Z');
+const bars=Array.from({length:30},(_,i)=>({time:new Date(now-30*300000+i*300000).toISOString(),close:1.1,ticks:3}));
+const quote={source:'STREAM',marketState:'DEAL',delayed:'0',bid:1.1000,ask:1.1001,at:now-1000};
+const signal={direction:'LONG',score:80};
+const base=()=>({equity:10000,day:'2026-11-05',dayStartEquity:10000,dailyOpens:0,dayRealized:0,position:null,lastEntryBar:null,sequence:0});
+test('requires verified streaming prices, not REST or delayed',()=>{assert.equal(validMarket(quote,signal,bars,now),true);assert.equal(validMarket({...quote,source:'REST'},signal,bars,now),false);assert.equal(validMarket({...quote,delayed:null},signal,bars,now),false);assert.equal(validMarket({...quote,at:now-20000},signal,bars,now),false)});
+test('opens virtual trade at ask with exactly 0.25% planned stop risk',()=>{const a=evaluate(base(),quote,signal,bars,now);assert.equal(a.kind,'OPEN');assert.equal(a.riskGBP,25);assert.equal(a.virtualGBPPerPip,25/12);assert.ok(Math.abs((a.entry-a.stop)/0.0001-12)<1e-8)});
+test('daily entry cap and loss stop prevent entries',()=>{assert.equal(evaluate({...base(),dailyOpens:2},quote,signal,bars,now).kind,'SKIP');assert.equal(evaluate({...base(),dayRealized:-100},quote,signal,bars,now).kind,'SKIP')});
+test('duplicate signal bar cannot open twice',()=>{assert.equal(evaluate({...base(),lastEntryBar:bars.at(-1).time},quote,signal,bars,now).kind,'SKIP')});
+test('closes virtual long at bid on stop',()=>{const state=base();state.position={direction:'LONG',entry:1.1015,stop:1.1005,target:1.1033,virtualGBPPerPip:2,openedAt:new Date(now-10000).toISOString()};const a=evaluate(state,quote,signal,bars,now);assert.equal(a.kind,'CLOSE');assert.equal(a.reason,'STOP');assert.ok(a.pnl<0)});
+test('does not open without sufficient bars',()=>{assert.equal(evaluate(base(),quote,signal,bars.slice(2),now).kind,'SKIP')});
