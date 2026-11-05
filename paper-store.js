@@ -9,12 +9,30 @@ const pool=new Pool({
 });
 
 async function savePaperEvent(event){
-  if(!event || !['OPEN','CLOSE'].includes(event.kind)){
+  if(!event || !['OPEN','CLOSE','INTERRUPTED'].includes(event.kind)){
     throw Error('Invalid paper trading event');
   }
 
+  if(event.kind==='INTERRUPTED'){
+    if(
+      typeof event.openEventId!=='string' ||
+      !/^[a-f0-9]{64}$/.test(event.openEventId) ||
+      typeof event.at!=='string' ||
+      !Number.isFinite(Date.parse(event.at)) ||
+      !['LONG','SHORT'].includes(event.direction) ||
+      event.exit!=null ||
+      event.pnlPips!=null
+    ){
+      throw Error('Invalid paper interruption record');
+    }
+  }
+
   const id=crypto.createHash('sha256')
-    .update(JSON.stringify(event))
+    .update(
+      event.kind==='INTERRUPTED'
+        ? 'PAPER_INTERRUPTED:'+event.openEventId
+        : JSON.stringify(event)
+    )
     .digest('hex');
 
   const result=await pool.query(
@@ -39,10 +57,13 @@ async function savePaperEvent(event){
 
 async function getPaperEvents(limit=1000){
   const result=await pool.query(
-    'SELECT details FROM paper_trade_events ORDER BY event_time DESC, created_at DESC LIMIT $1',
+    'SELECT id, details FROM paper_trade_events ORDER BY event_time DESC, created_at DESC, id DESC LIMIT $1',
     [Math.min(10000,Math.max(1,limit))]
   );
-  return result.rows.map(row=>row.details);
+  return result.rows.map(row=>({
+    ...row.details,
+    archiveEventId:row.id
+  }));
 }
 
 module.exports={savePaperEvent,getPaperEvents};
