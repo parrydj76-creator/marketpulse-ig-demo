@@ -20,6 +20,31 @@ function createPushAlerts(){
   app.get('/api/push/key',(_req,res)=>res.json({publicKey:ready?process.env.VAPID_PUBLIC_KEY:null}));
   app.post('/api/push/subscribe',auth,async(req,res)=>{if(!ready)return res.status(503).json({error:'Push service unavailable'});if(!validSubscription(req.body))return res.status(400).json({error:'Invalid subscription'});try{const hash=crypto.createHash('sha256').update(req.body.endpoint).digest('hex');await pool.query('INSERT INTO mp_push_subscriptions(endpoint_hash,subscription) VALUES($1,$2) ON CONFLICT(endpoint_hash) DO UPDATE SET subscription=excluded.subscription',[hash,JSON.stringify(req.body)]);res.json({ok:true})}catch(e){res.status(503).json({error:'Subscription storage unavailable'})}});
   app.post('/api/push/unsubscribe',auth,async(req,res)=>{if(!ready)return res.status(503).json({error:'Push service unavailable'});const endpoint=req.body?.endpoint;if(typeof endpoint!=='string')return res.status(400).json({error:'Endpoint required'});try{await pool.query('DELETE FROM mp_push_subscriptions WHERE endpoint_hash=$1',[crypto.createHash('sha256').update(endpoint).digest('hex')]);res.json({ok:true})}catch(e){res.status(503).json({error:'Storage unavailable'})}});
+  // Manual delivery test: authenticated, rate-limited, no trading actions.
+  let testLastSentAt=0;
+  app.post('/api/push/test',auth,async(_req,res)=>{
+   if(!ready)return res.status(503).json({error:'Push service unavailable'});
+   const now=Date.now();
+   if(now-testLastSentAt<30000)return res.status(429).json({error:'Wait 30 seconds before sending another test'});
+   testLastSentAt=now;
+   try{
+    const subs=await pool.query('SELECT endpoint_hash,subscription FROM mp_push_subscriptions LIMIT 100');
+    if(!subs.rows.length)return res.status(404).json({error:'No saved push subscriptions. Enable notifications first.'});
+    let sent=0,failed=0;
+    for(const sub of subs.rows){
+     try{
+      await webpush.sendNotification(sub.subscription,JSON.stringify({title:'MarketPulse AI · Test',body:'Test notification received. Your iPhone push delivery is working.',url:'/'}),{TTL:120,urgency:'normal'});
+      sent++;
+     }catch(e){
+      failed++;
+      if(e.statusCode===404||e.statusCode===410){
+       await pool.query('DELETE FROM mp_push_subscriptions WHERE endpoint_hash=$1',[sub.endpoint_hash]);
+      }else console.error('Test push delivery failed:',e.statusCode||e.message);
+     }
+    }
+    res.set('Cache-Control','no-store').json({ok:sent>0,accepted:sent,failed,subscriptions:subs.rows.length,note:'Accepted by push provider does not guarantee the notification was displayed.'});
+   }catch(e){console.error('Push test failed:',e.message);res.status(503).json({error:'Unable to send test notification'});}
+  });
   app.get('/api/push/history',auth,async(_req,res)=>{if(!ready)return res.status(503).json({error:'Push service unavailable'});try{const x=await pool.query('SELECT direction,score,bar_time,created_at FROM mp_signal_events ORDER BY created_at DESC LIMIT 50');res.set('Cache-Control','no-store').json({events:x.rows})}catch(e){res.status(503).json({error:'History unavailable'})}});
  }
  async function tick(data){if(!ready||busy)return;busy=true;try{const view=interpret(data),key=alertKey(view);if(!key)return;
