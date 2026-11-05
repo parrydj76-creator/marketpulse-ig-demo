@@ -1,4 +1,5 @@
  'use strict';
+const {randomUUID}=require('crypto');
 // PAPER ONLY: this module never calls IG trading APIs or submits broker orders.
 class PaperEngine {
  constructor(opts={}){this.cfg={epic:opts.epic||'CS.D.EURUSD.CFD.IP',dailyCap:opts.dailyCap||2,stopPips:opts.stopPips||12,targetPips:opts.targetPips||18,maxSpreadPips:opts.maxSpreadPips||2,holdMinutes:opts.holdMinutes||180,cooldownMinutes:opts.cooldownMinutes||30,minScore:opts.minScore||70};this.reset()}
@@ -12,15 +13,16 @@ class PaperEngine {
   if(!fresh)return;
   if(this.position){const p=this.position;const exitPrice=p.direction==='LONG'?q.bid:q.ask;const move=(exitPrice-p.entry)*(p.direction==='LONG'?1:-1)/0.0001;
    let reason=null;if(move<=-this.cfg.stopPips)reason='STOP';else if(move>=this.cfg.targetPips)reason='TARGET';else if(now-p.openedMs>=this.cfg.holdMinutes*60000)reason='MAX_HOLD';else if((p.direction==='LONG'&&s.direction==='SHORT')||(p.direction==='SHORT'&&s.direction==='LONG'))reason='REVERSAL';
-   if(reason){const pnl=Number(move.toFixed(2));this.realizedPips+=pnl;this.history.unshift({kind:'CLOSE',at:new Date(now).toISOString(),direction:p.direction,entry:p.entry,exit:exitPrice,pnlPips:pnl,reason});this.position=null;this.lastCloseAt=now}return;
+   if(reason){const pnl=Number(move.toFixed(2));this.realizedPips+=pnl;this.history.unshift({kind:'CLOSE',tradeId:p.tradeId,at:new Date(now).toISOString(),direction:p.direction,entry:p.entry,exit:exitPrice,pnlPips:pnl,reason});this.position=null;this.lastCloseAt=now}return;
   }
   if(spread>this.cfg.maxSpreadPips||this.dailyOpens>=this.cfg.dailyCap||now-this.lastCloseAt<this.cfg.cooldownMinutes*60000)return;
   if(!s||!['LONG','SHORT'].includes(s.direction)||s.score<this.cfg.minScore||s.bars<30)return;
   // One entry per completed 5-minute signal bar; avoid repeated signals on every 15s cycle.
   const bar=Math.floor(now/300000);if(this.lastSignalBar===bar)return;this.lastSignalBar=bar;
   const entry=s.direction==='LONG'?q.ask:q.bid;
-  this.position={direction:s.direction,entry,openedAt:new Date(now).toISOString(),openedMs:now,signalScore:s.score,spreadPips:Number(spread.toFixed(2))};this.dailyOpens++;
-  this.history.unshift({kind:'OPEN',at:new Date(now).toISOString(),direction:s.direction,entry,score:s.score,spreadPips:Number(spread.toFixed(2))});this.history=this.history.slice(0,100);
+  const tradeId=randomUUID();
+  this.position={tradeId,direction:s.direction,entry,openedAt:new Date(now).toISOString(),openedMs:now,signalScore:s.score,spreadPips:Number(spread.toFixed(2))};this.dailyOpens++;
+  this.history.unshift({kind:'OPEN',tradeId,at:new Date(now).toISOString(),direction:s.direction,entry,score:s.score,spreadPips:Number(spread.toFixed(2))});this.history=this.history.slice(0,100);
  }
 }
 module.exports={PaperEngine};

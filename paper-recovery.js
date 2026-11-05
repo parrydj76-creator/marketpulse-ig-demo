@@ -15,6 +15,7 @@ async function inspectPaperRecovery() {
 
   const unresolved = new Map();
   const interrupted = new Set();
+  const seenTradeIds = new Set();
 
   let dailyOpens = 0;
   let lastCloseAt = 0;
@@ -43,6 +44,19 @@ async function inspectPaperRecovery() {
         throw Error('Duplicate paper OPEN event');
       }
 
+      if (event.tradeId != null) {
+        if (typeof event.tradeId !== 'string' ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(event.tradeId)) {
+          throw Error('Invalid OPEN trade ID');
+        }
+
+        if (seenTradeIds.has(event.tradeId)) {
+          throw Error('Duplicate OPEN trade ID in archive');
+        }
+
+        seenTradeIds.add(event.tradeId);
+      }
+
       unresolved.set(id, event);
 
       if (event.at.slice(0, 10) === today) {
@@ -51,13 +65,38 @@ async function inspectPaperRecovery() {
     }
 
     if (event.kind === 'CLOSE') {
-      // Legacy CLOSE events have no trade ID.
-      // Never guess which OPEN a CLOSE belongs to.
-      if (unresolved.size !== 1) {
-        throw Error('Ambiguous paper CLOSE: trade linkage required');
+      // New CLOSE events must match their OPEN by tradeId.
+      // Legacy CLOSE events are accepted only when exactly one
+      // unresolved OPEN exists and neither event has a tradeId.
+      let match;
+
+      if (event.tradeId != null) {
+        if (typeof event.tradeId !== 'string' || !event.tradeId) {
+          throw Error('Invalid CLOSE trade ID');
+        }
+
+        const matches = [...unresolved.entries()].filter(
+          ([, open]) => open.tradeId === event.tradeId
+        );
+
+        if (matches.length !== 1) {
+          throw Error('CLOSE trade ID has no unique matching OPEN');
+        }
+
+        match = matches[0];
+      } else {
+        if (unresolved.size !== 1) {
+          throw Error('Ambiguous legacy CLOSE: trade linkage required');
+        }
+
+        match = unresolved.entries().next().value;
+
+        if (match[1].tradeId != null) {
+          throw Error('New OPEN cannot be closed by legacy CLOSE');
+        }
       }
 
-      const [id, open] = unresolved.entries().next().value;
+      const [id, open] = match;
 
       if (open.direction !== event.direction) {
         throw Error('Paper CLOSE direction mismatch');
