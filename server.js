@@ -76,6 +76,7 @@ const restState={enabled:true,intervalSeconds:REST_POLL_SECONDS,requestedMarkets
 let restPolling=false,restTimer=null,restBackoffUntil=0;
 const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
 const paperArchiver=new PaperArchiver();
+const {durablePaperTick,restorePaperEngine}=require('./paper-durable');
 // Fail closed until archived paper trading state has been checked.
 let paperRecoveryReady=false;
 let paperRecoveryStatus={state:'NOT_CHECKED'};
@@ -92,8 +93,8 @@ async function recoverPaperOnStartup(){
       ...result
     };
 
-    // Remain paused until full state restoration is implemented.
-    // Inspection alone does not make resuming safe.
+    // Restore counters only for inspection. No automatic trading authorization.
+    if(result.safeToResume)restorePaperEngine(paper,result);
     paperRecoveryReady=false;
 
     log('Paper recovery: '+paperRecoveryStatus.state+
@@ -591,17 +592,21 @@ app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','anal
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
-setInterval(()=>{try{
-if(!paperRecoveryReady){
-  return;
-}
-const q=quotes.get('CS.D.EURUSD.CFD.IP');const s=analyse('CS.D.EURUSD.CFD.IP');const previousEvent=paper.history[0];
-paper.tick(q,s,Date.now());
-const latestEvent=paper.history[0];
-if(latestEvent && latestEvent!==previousEvent){
-  paperArchiver.enqueue([latestEvent]);
-}
-void paperArchiver.flush().catch(e=>log('Paper archive: '+e.message))}catch(e){log('Paper cycle: '+e.message)}},15000);
+let paperCycleBusy=false;
+setInterval(async()=>{
+  if(!paperRecoveryReady || paperCycleBusy)return;
+  paperCycleBusy=true;
+  try{
+    const q=quotes.get('CS.D.EURUSD.CFD.IP');
+    const s=analyse('CS.D.EURUSD.CFD.IP');
+    await durablePaperTick(paper,q,s,Date.now());
+  }catch(e){
+    paperRecoveryReady=false;
+    paper.enabled=false;
+    paperRecoveryStatus={...paperRecoveryStatus,state:'ERROR',error:'Paper cycle halted: '+e.message};
+    log('Paper cycle halted: '+e.message);
+  }finally{paperCycleBusy=false;}
+},15000);
 
 let autoStartChecking=false;
 async function tryAutoStart(){

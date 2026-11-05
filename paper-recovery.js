@@ -21,6 +21,8 @@ async function inspectPaperRecovery() {
   let lastCloseAt = 0;
   let realizedPips = 0;
   let completedTrades = 0;
+  let lastSignalBar = null;
+  let lastEventAt = -Infinity;
 
   for (const event of chronological) {
     if (!event || !['OPEN', 'CLOSE', 'INTERRUPTED'].includes(event.kind)) {
@@ -32,6 +34,9 @@ async function inspectPaperRecovery() {
     if (!Number.isFinite(timestamp)) {
       throw Error('Invalid archived event timestamp');
     }
+
+    if (timestamp < lastEventAt) throw Error('Archived paper events are out of chronological order');
+    lastEventAt = timestamp;
 
     if (event.kind === 'OPEN') {
       const id = event.archiveEventId;
@@ -57,7 +62,9 @@ async function inspectPaperRecovery() {
         seenTradeIds.add(event.tradeId);
       }
 
+      if (!['LONG','SHORT'].includes(event.direction) || !Number.isFinite(event.entry)) throw Error('Invalid archived OPEN');
       unresolved.set(id, event);
+      if(event.at.slice(0,10)===today)lastSignalBar=Math.floor(timestamp/300000);
 
       if (event.at.slice(0, 10) === today) {
         dailyOpens++;
@@ -150,6 +157,7 @@ async function inspectPaperRecovery() {
     lastCloseAt,
     realizedPips: Number(realizedPips.toFixed(2)),
     completedTrades,
+    lastSignalBar,
     interruptedTrades: interrupted.size,
     unresolvedPositions: [...unresolved.entries()].map(([id, event]) => ({
       openEventId: id,
