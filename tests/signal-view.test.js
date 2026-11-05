@@ -1,0 +1,12 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {interpret,alertKey}=require('../public/signal-view');
+const market={epic:'CS.D.EURUSD.CFD.IP',streaming:true,priceSource:'STREAM',ageSeconds:0,direction:'LONG',score:78,bars:30,lastBarTime:'2026-11-05T16:00:00.000Z'};
+const payload=(m=market,fresh=true)=>({feedHealth:{freshStream:fresh},markets:[m]});
+test('fresh qualified signal is eligible for page-open alert',()=>{const x=interpret(payload());assert.equal(x.direction,'LONG');assert.ok(alertKey(x))});
+test('stale feed prevents alerts',()=>{const x=interpret(payload(market,false));assert.equal(x.direction,'NO DATA');assert.equal(alertKey(x),null)});
+test('warm-up is not a trade signal',()=>{const x=interpret(payload({...market,bars:4,direction:'WARMING'}));assert.equal(x.direction,'WARMING');assert.equal(x.alertable,false)});
+test('low-score direction is not alertable',()=>{const x=interpret(payload({...market,score:60}));assert.equal(x.direction,'LONG');assert.equal(x.alertable,false)});
+test('unknown direction fails closed',()=>assert.equal(interpret(payload({...market,direction:'UNKNOWN'})).direction,'WAIT'));
+test('missing candle timestamp prevents duplicate-unsafe notifications',()=>assert.equal(alertKey(interpret(payload({...market,lastBarTime:null}))),null));
