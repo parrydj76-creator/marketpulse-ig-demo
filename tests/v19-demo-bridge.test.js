@@ -1,0 +1,5 @@
+'use strict';const test=require('node:test');const assert=require('node:assert/strict');const {calculatePreview,inspectMarket}=require('../v19-demo-bridge');
+test('risk preview always blocks broker orders even with verified flags',()=>{const r=calculatePreview({equityGBP:10000,stopPips:12,gbpPerPipPerDeal:1,dealSize:1,conversionVerified:true,contractVerified:true,brokerUnitsVerified:true});assert.equal(r.brokerExecutable,false);assert.equal(r.brokerOrderAllowed,false);assert.equal(r.plannedStopLossGBP,12)});
+test('rejects loss beyond quarter percent',()=>assert.equal(calculatePreview({equityGBP:10000,stopPips:12,gbpPerPipPerDeal:10,dealSize:1}).passesArithmetic,false));
+test('rejects size below minimum',()=>assert.equal(calculatePreview({equityGBP:10000,stopPips:12,gbpPerPipPerDeal:1,dealSize:.1,minDealSize:1}).passesArithmetic,false));
+test('does not confuse points with pips',()=>{const r=inspectMarket({instrument:{contractSize:'100000'},dealingRules:{minDealSize:{unit:'POINTS',value:1}}});assert.deepEqual(r.minDealSize,{unit:'POINTS',value:1});assert.equal(r.valueOfOnePip,null)});
