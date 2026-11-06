@@ -12,11 +12,16 @@ function validMarket(q,s,bars,now=Date.now()){
  const recent=bars.slice(-30);
  return recent.every((b,i)=>Number.isFinite(b.close)&&b.ticks>=2&&Number.isFinite(Date.parse(b.time))&&(i===0||Date.parse(b.time)-Date.parse(recent[i-1].time)===300000))&&now-Date.parse(recent.at(-1).time)<600000;
 }
+function validExitQuote(q,now=Date.now()){
+ return !!q&&q.source==='STREAM'&&q.marketState==='DEAL'&&String(q.delayed)==='0'&&Number.isFinite(q.at)&&now>=q.at&&now-q.at<15000&&Number.isFinite(q.bid)&&Number.isFinite(q.ask)&&q.bid>0&&q.ask>q.bid;
+}
 function evaluate(state,q,s,bars,now=Date.now()){
  const date=new Date(now).toISOString().slice(0,10);
  if(state.day!==date){state.day=date;state.dayStartEquity=state.equity;state.dailyOpens=0;state.dayRealized=0;}
- if(!validMarket(q,s,bars,now))return {kind:'SKIP',reason:'Streaming market conditions or bars not verified'};
  if(state.position){
+  // Exits must not depend on indicator warm-up or historical bar integrity.
+  // Still require a fresh, verified, undelayed stream to avoid stale fills.
+  if(!validExitQuote(q,now))return {kind:'SKIP',reason:'EXIT_WAITING_FOR_VERIFIED_QUOTE'};
   const p=state.position,exit=p.direction==='LONG'?q.bid:q.ask;
   const hitStop=p.direction==='LONG'?exit<=p.stop:exit>=p.stop;
   const hitTarget=p.direction==='LONG'?exit>=p.target:exit<=p.target;
@@ -25,8 +30,10 @@ function evaluate(state,q,s,bars,now=Date.now()){
   const pnl=(p.direction==='LONG'?exit-p.entry:p.entry-exit)/PIP*p.virtualGBPPerPip;
   return {kind:'CLOSE',reason:hitStop?'STOP':hitTarget?'TARGET':'TIME',exit,pnl};
  }
+ if(!validMarket(q,s,bars,now))return {kind:'SKIP',reason:'Streaming market conditions or bars not verified'};
  if(state.dailyOpens>=CONFIG.maxNewTradesPerDay)return {kind:'SKIP',reason:'Daily entry cap'};
  if(state.dayRealized<=-state.dayStartEquity*CONFIG.dailyLossFraction)return {kind:'SKIP',reason:'Daily loss stop'};
+ if(Math.max(0,-state.dayRealized)+state.equity*CONFIG.riskFraction>state.dayStartEquity*CONFIG.dailyLossFraction+0.00001)return {kind:'SKIP',reason:'Insufficient remaining daily risk budget'};
  if(!['LONG','SHORT'].includes(s.direction)||!Number.isFinite(s.score)||s.score<CONFIG.minScore)return {kind:'SKIP',reason:'No qualifying signal'};
  const bar=bars.at(-1).time;
  if(state.lastEntryBar===bar)return {kind:'SKIP',reason:'Signal bar already used'};
@@ -107,4 +114,4 @@ function createV9Paper(onEvent=async()=>{}){
  }
  return {init,tick,routes,status,diagnostics};
 }
-module.exports={CONFIG,validMarket,evaluate,createV9Paper};
+module.exports={CONFIG,validMarket,validExitQuote,evaluate,createV9Paper};
