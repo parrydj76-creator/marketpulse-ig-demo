@@ -1,0 +1,5 @@
+'use strict';const {test}=require('node:test'),assert=require('node:assert/strict');const {monetaryIllustration,assessSignal}=require('../v17-readiness');
+test('hypothetical size never becomes executable',()=>{const r=monetaryIllustration({equityGBP:10000,stopPips:12,pipValueUSDPerUnit:10,usdToGbp:.8,minSize:.1,sizeStep:.1});assert.equal(r.brokerExecutable,false);assert.equal(r.independentlyVerified,false);assert.ok(r.hypotheticalStopRiskGBP<=25)});
+test('rejects invalid monetary inputs',()=>assert.throws(()=>monetaryIllustration({equityGBP:10000,stopPips:12,pipValueUSDPerUnit:0,usdToGbp:.8,minSize:1,sizeStep:1})));
+test('stale and REST signals fail closed',()=>{const r=assessSignal({direction:'SHORT',score:80,bar:new Date().toISOString(),quoteSource:'REST',quoteAgeMs:1,marketState:'DEAL',bid:1.1,ask:1.1001});assert.equal(r.eligible,false)});
+test('valid streamed signal passes only eligibility',()=>{const r=assessSignal({direction:'SHORT',score:80,bar:new Date().toISOString(),quoteSource:'STREAM',quoteAgeMs:1000,marketState:'DEAL',bid:1.1,ask:1.1001});assert.equal(r.eligible,true);assert.equal(r.simulationOnly,true)});
