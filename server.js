@@ -636,6 +636,16 @@ void v15Lab.init().catch(e=>console.error('[V15]',e.message));
 const v16Lab=require('./v16-safety').createV16({requireAdmin});
 v16Lab.routes(app);
 void v16Lab.init().catch(e=>console.error('[V16]',e.message));
+// V17: simulation-only signal rehearsal and risk readiness. Registered before legacy catch-all.
+const v17Lab=require('./v17-readiness').createV17({requireAdmin,signalSnapshot:()=>{
+ const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
+ return {epic,direction:a.direction,score:a.score,reason:a.reason,bar:bars.at(-1)?.time||null,
+  quoteAgeMs:q?Date.now()-q.at:null,quoteSource:q?.source||null,marketState:q?.marketState||null,
+  bid:q?.bid??null,ask:q?.ask??null};
+}});
+v17Lab.routes(app);
+void v17Lab.init().catch(e=>console.error('[V17]',e.message));
+setInterval(()=>{void v17Lab.tick().catch(e=>console.error('[V17 tick]',e.message))},30000);
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
