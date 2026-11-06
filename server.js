@@ -708,6 +708,8 @@ const v28Verification=require('./v28-verification').createV28({requireAdmin,api,
 v28Verification.routes(app);
 // V29: observe operator-executed IG demo order lifecycle; never submits orders.
 require('./v29-lifecycle').createV29({requireAdmin,api,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
+// V30: historical IG DEMO evidence; read-only, broker orders still hard blocked.
+require('./v30-history').createV30({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
