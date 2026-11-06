@@ -677,6 +677,10 @@ void v22Engine.init().catch(e=>console.error('[V22]',e.message));
 const v23Engine=require('./v23-engine').createV23({requireAdmin,api});
 v23Engine.routes(app);
 void v23Engine.init().catch(e=>console.error('[V23]',e.message));
+// V24 read-only evidence and synthetic recovery laboratory. No broker writes.
+const v24Engine=require('./v24-engine').createV24({requireAdmin,api});
+v24Engine.routes(app);
+void v24Engine.init().catch(e=>console.error('[V24]',e.message));
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
