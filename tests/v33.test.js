@@ -1,0 +1,15 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {sizing,candidates,reconcile}=require('../v33-automation');
+const fixture={accountType:'CFD',accountCurrency:'GBP',size:1,pipSize:0.0001,pipValueQuotePerContract:10,contractsPerSize:1,gbpPerQuote:0.77,stopPips:2,maxRiskGBP:25,minimumSize:1,sizeIncrement:1,minimumStopPips:2,slippageReserveGBP:3};
+test('GBP worksheet calculates but never certifies',()=>{const r=sizing(fixture);assert.equal(r.totalRiskGBP,18.4);assert.equal(r.withinBudget,true);assert.equal(r.certified,false);assert.equal(r.brokerOrderAllowed,false)});
+test('rejects missing quote conversion',()=>assert.throws(()=>sizing({...fixture,gbpPerQuote:null})));
+test('rejects invalid account',()=>assert.throws(()=>sizing({...fixture,accountType:'SPREADBET'})));
+test('rejects size below minimum',()=>assert.equal(sizing({...fixture,size:0.5}).sizeValid,false));
+test('rejects invalid increment',()=>assert.equal(sizing({...fixture,size:1.5}).sizeValid,false));
+test('rejects too close stop',()=>assert.equal(sizing({...fixture,stopPips:1}).stopValid,false));
+test('detects exact reference',()=>{const c=candidates([{reference:'S7PAP8BB',instrumentName:'EUR/USD'}],{dealId:'S7PAP8BB'});assert.equal(c[0].exactReferenceMatch,true)});
+test('correlation is only a candidate',()=>{const c=candidates([{reference:'different',instrumentName:'EUR/USD',openLevel:1.11545}],{dealId:'S7PAP8BB',instrument:'EUR/USD',openLevel:1.11545});assert.equal(c[0].possibleCorrelation,true);assert.equal(c[0].exactReferenceMatch,false)});
+test('unresolved journal always blocks',()=>{const r=reconcile([{intentId:'test-001',state:'SENT_UNKNOWN'}],[]);assert.deepEqual(r.unresolved,['test-001']);assert.equal(r.safeToSubmitNewOrder,false)});
+test('rejects duplicate intent IDs',()=>assert.throws(()=>reconcile([{intentId:'test-001',state:'PREPARED'},{intentId:'test-001',state:'PREPARED'}],[])));
+test('closed journal with still open broker position requires review',()=>{const r=reconcile([{intentId:'test-001',state:'CLOSED_VERIFIED',dealId:'DEAL-01'}],[{position:{dealId:'DEAL-01'}}]);assert.equal(r.unresolved.length,1)});
