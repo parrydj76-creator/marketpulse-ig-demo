@@ -658,6 +658,11 @@ const v19Bridge=require('./v19-demo-bridge').createV19({requireAdmin,api,v17Lab,
  return {epic,direction:a.direction,score:a.score,reason:a.reason,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null};
 }});
 v19Bridge.routes(app);
+// V20: fail-closed monetary and broker readiness checks. No broker write requests.
+require('./v20-execution-gates').createV20({requireAdmin,api,signalSnapshot:()=>{
+ const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic);
+ return {direction:a.direction,score:a.score,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null};
+}}).routes(app);
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
