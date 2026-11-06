@@ -617,6 +617,10 @@ require('./v10-readiness').registerV10(app,requireAdmin,{v9Paper,api,accountSnap
 const v11Lab=require('./v11-execution-lab').createExecutionLab({api,v9Paper,requireAdmin});
 v11Lab.routes(app);
 void v11Lab.init().catch(e=>console.error('[V11 lab] startup:',e.message));
+// V12: authenticated read-only broker evidence and paper lifecycle audits; no broker order operations.
+const v12Validation=require('./v12-validation').createV12({api,v9Paper,requireAdmin});
+v12Validation.routes(app);
+void v12Validation.init().catch(e=>console.error('[V12]',e.message));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
