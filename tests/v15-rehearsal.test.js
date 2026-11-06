@@ -1,0 +1,12 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {riskAudit,planScenario}=require('../v15-rehearsal');
+test('quarter-percent virtual risk accepted',()=>assert.equal(riskAudit({equityGBP:10000,plannedRiskGBP:25}).pass,true));
+test('risk over quarter-percent rejected',()=>assert.equal(riskAudit({equityGBP:10000,plannedRiskGBP:25.01}).pass,false));
+test('daily loss stop rejects exactly 1 percent',()=>assert.equal(riskAudit({equityGBP:10000,dailyLossGBP:100}).pass,false));
+test('two new trades exhaust daily cap',()=>assert.equal(riskAudit({newTradesToday:2}).pass,false));
+test('combined risk and loss exceeds daily budget',()=>assert.equal(riskAudit({dailyLossGBP:80,plannedRiskGBP:25}).pass,false));
+test('timeout-found resolves without resubmission',()=>assert.deepEqual(planScenario('TIMEOUT_FOUND').history,['PREPARED','SUBMITTED_SIM','UNKNOWN_SIM','RECONCILED_SIM']));
+test('timeout-absent resolves to simulated rejection',()=>assert.equal(planScenario('TIMEOUT_ABSENT').finalState,'REJECTED_SIM'));
+test('unsupported scenario fails closed',()=>assert.throws(()=>planScenario('LIVE_ORDER')));
+test('broker execution always false in virtual audit',()=>assert.equal(riskAudit().brokerExecutable,false));
