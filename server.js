@@ -690,6 +690,22 @@ const v25Autonomy=require('./v25-autonomy').createV25({requireAdmin,signalSnapsh
 }});
 v25Autonomy.routes(app);
 setInterval(()=>{v25Autonomy.tick((()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null}})())},15000);
+// V26 integrated diagnostics; broker execution remains hard-blocked in this module.
+const v26Readiness=require('./v26-readiness').createV26({requireAdmin,
+ simulation:()=>v25Autonomy.status(),
+ feed:()=>{const q=quotes.get('CS.D.EURUSD.CFD.IP');return {streamStatus,source:q?.source||null,ageMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true};},
+ broker:()=>({brokerReconciled,persistenceHealthy,pendingOrder:!!trade.pendingOrder})
+});
+v26Readiness.routes(app);
+// V27 offline evidence and synthetic failure-injection tests. No broker write paths.
+const v27Lab=require('./v27-execution-lab').createV27({requireAdmin,readiness:()=>v26Readiness.report(),storageDir:DATA_DIR});
+v27Lab.routes(app);
+// V28 independent-verification preparation: read-only IG evidence, risk math and recovery triage.
+// No IG write API or broker authorization in this module.
+const v28Verification=require('./v28-verification').createV28({requireAdmin,api,
+ readLocal:()=>({pendingOrder:trade.pendingOrder,tracked:trade.tracked,persistenceHealthy,brokerReconciled}),
+ appendEvidence:(type,details)=>v27Lab.append(type,details)});
+v28Verification.routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
