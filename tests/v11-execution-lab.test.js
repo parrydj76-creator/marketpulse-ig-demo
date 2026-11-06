@@ -1,0 +1,14 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');
+const {brokerRuleAudit,validateSimulatedPosition,scenarioTests,makeIntentId}=require('../v11-execution-lab');
+const {evaluate,validExitQuote}=require('../v9-paper');
+const now=Date.parse('2026-11-05T22:00:00Z');
+const quote={source:'STREAM',marketState:'DEAL',delayed:'0',bid:1.0999,ask:1.1000,at:now-1000};
+const base=()=>({equity:10000,day:'2026-11-05',dayStartEquity:10000,dailyOpens:1,dayRealized:0,position:{direction:'LONG',entry:1.1015,stop:1.1005,target:1.1033,virtualGBPPerPip:2.083333333,riskGBP:25,openedAt:new Date(now-10000).toISOString()},lastEntryBar:null,sequence:1});
+test('existing position exits at stop even with missing bars',()=>{const a=evaluate(base(),quote,{direction:'WAIT',score:0},[],now);assert.equal(a.kind,'CLOSE');assert.equal(a.reason,'STOP')});
+test('existing position does not exit on stale quote',()=>{assert.equal(validExitQuote({...quote,at:now-20000},now),false);assert.equal(evaluate(base(),{...quote,at:now-20000},{},[],now).kind,'SKIP')});
+test('new entry blocked if remaining daily loss budget inadequate',()=>{const state=base();state.position=null;state.dayRealized=-90;const bars=Array.from({length:30},(_,i)=>({time:new Date(now-30*300000+i*300000).toISOString(),close:1.1,ticks:3}));assert.match(evaluate(state,quote,{direction:'LONG',score:80},bars,now).reason,/remaining daily risk budget/)});
+test('broker rule values never treated as pip value or size',()=>{const a=brokerRuleAudit({dealingRules:{minDealSize:{unit:'POINTS',value:1},minNormalStopOrLimitDistance:{unit:'POINTS',value:2}},snapshot:{marketStatus:'TRADEABLE'}});assert.equal(a.brokerDealSize,null);assert.equal(a.brokerGBPPerPip,null);assert.equal(a.riskBudgetGBP,25)});
+test('paper intent IDs stable and unique by sequence',()=>{assert.equal(makeIntentId(3,'OPEN'),makeIntentId(3,'OPEN'));assert.notEqual(makeIntentId(3,'OPEN'),makeIntentId(3,'CLOSE'))});
+test('invalid protective orientation is rejected',()=>assert.equal(validateSimulatedPosition({...base().position,stop:1.102}).valid,false));
+test('local scenarios pass without implying broker readiness',()=>{const a=scenarioTests();assert.equal(a.allPassed,true);assert.match(a.note,/NOT evidence/)});
