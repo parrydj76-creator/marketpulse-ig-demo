@@ -706,6 +706,8 @@ const v28Verification=require('./v28-verification').createV28({requireAdmin,api,
  readLocal:()=>({pendingOrder:trade.pendingOrder,tracked:trade.tracked,persistenceHealthy,brokerReconciled}),
  appendEvidence:(type,details)=>v27Lab.append(type,details)});
 v28Verification.routes(app);
+// V29: observe operator-executed IG demo order lifecycle; never submits orders.
+require('./v29-lifecycle').createV29({requireAdmin,api,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
