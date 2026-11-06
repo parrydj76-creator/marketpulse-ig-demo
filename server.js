@@ -713,6 +713,7 @@ require('./v30-history').createV30({requireAdmin,api,storageDir:DATA_DIR,persist
 require('./v31-readiness').createV31({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // V32 independent-verification workbench: no broker writes or arming.
 require('./v32-verification').createV32({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
+require('./v33-automation').createV33({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
