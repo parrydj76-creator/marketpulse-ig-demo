@@ -681,6 +681,15 @@ void v23Engine.init().catch(e=>console.error('[V23]',e.message));
 const v24Engine=require('./v24-engine').createV24({requireAdmin,api});
 v24Engine.routes(app);
 void v24Engine.init().catch(e=>console.error('[V24]',e.message));
+// V25 autonomous simulation: NO broker write calls or order authorization.
+const v25Autonomy=require('./v25-autonomy').createV25({requireAdmin,signalSnapshot:()=>{
+ const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];
+ return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,
+  quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,
+  delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null};
+}});
+v25Autonomy.routes(app);
+setInterval(()=>{v25Autonomy.tick((()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null}})())},15000);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
