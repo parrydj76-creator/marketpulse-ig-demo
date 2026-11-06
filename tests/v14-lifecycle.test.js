@@ -1,0 +1,10 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');const {intentId,validateDraft,transition}=require('../v14-lifecycle');const bar='2026-11-06T10:00:00.000Z';
+test('same signal yields same ID',()=>assert.equal(intentId({bar,direction:'SHORT'}),intentId({bar,direction:'SHORT'})));
+test('different direction different ID',()=>assert.notEqual(intentId({bar,direction:'SHORT'}),intentId({bar,direction:'LONG'})));
+test('bad direction rejected',()=>assert.throws(()=>intentId({bar,direction:'BUY'})));
+test('risk >0.25% fails',()=>assert.equal(validateDraft({direction:'SHORT',equityGBP:10000,riskGBP:26,stopPips:12}).simulatable,false));
+test('broker execution always false',()=>assert.equal(validateDraft({direction:'SHORT',equityGBP:10000,riskGBP:25,stopPips:12,brokerGBPPerPipVerified:true,brokerDealSizeVerified:true}).brokerExecutable,false));
+test('timeout is unknown',()=>assert.equal(transition('SUBMITTED_SIM','TIMEOUT'),'UNKNOWN_SIM'));
+test('unknown requires reconciliation',()=>assert.throws(()=>transition('UNKNOWN_SIM','SUBMIT')));
+test('reconcile unknown to found',()=>assert.equal(transition('UNKNOWN_SIM','RECONCILE_FOUND'),'RECONCILED_SIM'));
+test('reject invalid repeated submit',()=>assert.throws(()=>transition('SUBMITTED_SIM','SUBMIT')));
