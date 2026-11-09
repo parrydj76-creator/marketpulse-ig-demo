@@ -777,6 +777,16 @@ const v43Rehearsal=require('./v43-unattended').createV43({
 });
 v43Rehearsal.routes(app);
 
+// V44 automated read-only observation soak; never imports IG order submission.
+const v44Soak=require('./v44-soak').createV44({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
+ v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
+ v42Status:()=>v42Workbench.status(),
+ refresh41:()=>v41Observer.refresh(),refresh42:()=>v42Workbench.observe()
+});
+v44Soak.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
