@@ -738,6 +738,22 @@ v39Lifecycle.routes(app);
 // V40: offline protocol rehearsal, no broker order transport.
 const v40Protocol=require('./v40-protocol').createV40({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status(),v39Status:()=>v39Lifecycle.status()});
 v40Protocol.routes(app);
+// V41 read-only broker verification: GET endpoints only, no broker write methods.
+const v41Observer=require('./v41-broker-observer').createV41({
+ requireAdmin,
+ readBroker:async()=>{
+  const [positionResponse,marketResponse,accountResponse]=await Promise.all([
+   api('/positions','GET',null,'2'),
+   api('/markets/'+encodeURIComponent('CS.D.EURUSD.CFD.IP'),'GET'),
+   api('/accounts','GET')
+  ]);
+  const matching=(accountResponse.accounts||[]).find(a=>a.accountId===auth?.accountId);
+  return {positions:positionResponse.positions,market:marketResponse,account:matching?{accountId:matching.accountId}:null};
+ },
+ v36Status:()=>v36Paper.status(),v40Status:()=>v40Protocol.status()
+});
+v41Observer.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
