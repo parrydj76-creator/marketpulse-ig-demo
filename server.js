@@ -797,6 +797,17 @@ const v45Soak=require('./v45-soak').createV45({
 });
 v45Soak.routes(app);
 
+// V46 rate-limit-aware, read-only broker soak. Legacy monitors must remain disarmed.
+const v46Soak=require('./v46-soak').createV46({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
+ v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
+ v42Status:()=>v42Workbench.status(),v44Status:()=>v44Soak.status(),
+ v45Status:()=>v45Soak.status(),
+ refresh41:()=>v41Observer.refresh(),refresh42:()=>v42Workbench.observe()
+});
+v46Soak.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
