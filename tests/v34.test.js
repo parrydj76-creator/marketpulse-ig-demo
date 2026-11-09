@@ -1,0 +1,18 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const {evaluateSignal,inspectJournal,recoveryGate}=require('../v34-orchestrator');
+const signal={direction:'LONG',score:82,bar:'2026-11-06T15:00:00Z'};
+const feed={marketState:'TRADEABLE',delayed:false,ageMs:1000,bid:1.1154,ask:1.1155};
+const lim={storageHealthy:true,unresolvedIntents:0};
+test('valid signal is paper candidate only',()=>{const x=evaluateSignal(signal,feed,lim);assert.equal(x.decision,'PAPER_CANDIDATE');assert.equal(x.brokerOrderAllowed,false)});
+test('rejects stale feed',()=>assert.ok(evaluateSignal(signal,{...feed,ageMs:20000},lim).reasons.includes('STALE_FEED')));
+test('rejects delayed feed',()=>assert.ok(evaluateSignal(signal,{...feed,delayed:true},lim).reasons.includes('DELAYED_OR_UNKNOWN_FEED')));
+test('rejects missing bar',()=>assert.ok(evaluateSignal({...signal,bar:null},feed,lim).reasons.includes('MISSING_BAR')));
+test('rejects unresolved intent',()=>assert.ok(evaluateSignal(signal,feed,{...lim,unresolvedIntents:1}).reasons.includes('UNRESOLVED_ORDER_INTENT')));
+test('rejects bad spread',()=>assert.ok(evaluateSignal(signal,{...feed,ask:1.1},lim).reasons.includes('INVALID_SPREAD')));
+test('rejects weak signal',()=>assert.equal(evaluateSignal({...signal,score:60},feed,lim).decision,'REJECT'));
+test('rejects storage fault',()=>assert.ok(evaluateSignal(signal,feed,{...lim,storageHealthy:false}).reasons.includes('PERSISTENCE_NOT_VERIFIED')));
+test('empty journal valid',()=>assert.equal(inspectJournal([]).valid,true));
+test('tampered journal invalid',()=>assert.equal(inspectJournal([{previous:'GENESIS',event:{id:'abc'},digest:'bad'}]).valid,false));
+test('recovery never authorizes retry',()=>{const x=recoveryGate([{intentId:'a',state:'SENT_UNKNOWN'}],[]);assert.equal(x.autoRetryAllowed,false);assert.equal(x.requiresManualReview,true)});
+test('recovery rejects malformed inputs',()=>assert.throws(()=>recoveryGate(null,[])));
