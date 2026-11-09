@@ -732,6 +732,9 @@ v37Readiness.routes(app);
 // V38: isolated, read-only-by-default verification workbench; no IG broker write calls.
 const v38Workbench=require('./v38-verification').createV38({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v33Status:()=>v33Automation.status(),legacyExecutionEnabled:BROKER_DEMO_EXECUTION});
 v38Workbench.routes(app);
+
+const v39Lifecycle=require('./v39-lifecycle').createV39({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status()});
+v39Lifecycle.routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
