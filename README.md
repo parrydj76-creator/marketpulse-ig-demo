@@ -1,20 +1,21 @@
-# MarketPulse v25 autonomous simulation add-on
+# MarketPulse AI — GitHub-ready v47 deployment
 
-This is an **additive prototype**, not a complete deployable application: the uploaded server depends on many additional local modules and `public/` files not supplied. Keep those existing files in your GitHub repo. Replace `server.js`, add `v25-autonomy.js`, and optionally add `tests/v25.test.js`. The supplied `package.json` is unchanged.
-
-## Safety
-
-IG broker orders remain HARD_BLOCKED. All trades and GBP P&L are **illustrative**, using a manually configured GBP-per-pip assumption, not verified IG sizing. No broker POST calls are made by the new module. Stops are simulated and are evaluated only when the process receives a qualifying streaming quote; they are not broker-guaranteed. The simulation pauses after restart and preserves an open simulated position for inspection. No automated restart recovery or production-safe storage guarantees are claimed. Do not enable IG order flags.
+This is a **file-management consolidation only**, based on the supplied v47 archive. All runtime JS modules and dashboard assets remain unchanged. No v48 Mini integration or trading permission is included.
 
 ## Deploy
 
-1. Back up your GitHub project. Keep all preexisting modules and public dashboard files.
-2. Upload `server.js` and `v25-autonomy.js` to the repository root.
-3. Keep existing Render environment variables; do not set `ENABLE_IG_DEMO_ORDERS=true`.
-4. Deploy and check `/api/health` then use authenticated API endpoints with `X-Admin-Token` header.
-5. GET `/api/v25/status` to inspect, POST `/api/v25/start` to start simulation, POST `/api/v25/stop` to stop. PUT `/api/v25/config` with a complete numeric config object from status to change assumptions while paused and flat.
-6. Run `node --test tests/v25.test.js` locally.
+- Upload the **contents of this folder** to the root of the existing GitHub repository, preserving `public/`. GitHub does not unpack a ZIP uploaded as a file.
+- Keep the existing Render environment variables, persistent disk and build/start commands.
+- Build: `npm install` (or `npm ci`); start: `npm start`.
+- Check `GET /api/v47/status` with the existing admin token after deployment.
+- Broker execution must remain disabled. Do not enable legacy order flags or arm any order routes.
 
-## Limits
+## What's been consolidated
 
-Only EUR/USD; no broker orders, no real-time UI upgrade, no alerts, no historical backtest, no independent broker contract validation. The daily limit uses UTC and realized simulated P&L; it is not a broker risk control. Persistent storage must be configured for continuity across Render restarts.
+Historical README and INSTALL versions, plus tests, have been moved into the separate development archive. Runtime files remain separate because they are imported by `server.js`; deleting or renaming them would break the deployed app. The separate archive can be kept outside the deployed repository.
+
+## Caution
+
+The `render.yaml` file is copied verbatim from the supplied archive. Check its settings against your actual Render service before using Blueprint sync; an existing service may have different disk/environment settings.
+
+The IG EUR/USD Mini epic `CS.D.EURUSD.MINI.IP` was independently discovered by the user but is **not integrated** in this v47 packaging release.

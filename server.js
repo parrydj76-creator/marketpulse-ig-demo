@@ -824,6 +824,12 @@ const v47Certification=require('./v47-certification').createV47({
 });
 v47Certification.routes(app);
 
+// V48 Mini readiness: authenticated IG DEMO market reads only. No broker write adapter.
+const v48Mini=require('./v48-mini').createV48({
+ requireAdmin,api,v47Status:()=>v47Certification.status()
+});
+v48Mini.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
