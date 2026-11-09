@@ -808,6 +808,22 @@ const v46Soak=require('./v46-soak').createV46({
 });
 v46Soak.routes(app);
 
+// V47 read-only certification evidence. No broker order write functions are supplied.
+const v47Certification=require('./v47-certification').createV47({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v46Status:()=>v46Soak.status(),
+ readBroker:async()=>{
+  const [positions,market,accounts]=await Promise.all([
+   api('/positions','GET',null,'2'),
+   api('/markets/'+encodeURIComponent('CS.D.EURUSD.CFD.IP'),'GET'),
+   api('/accounts','GET')
+  ]);
+  const matching=(accounts.accounts||[]).find(a=>a.accountId===auth?.accountId);
+  return {positions:positions.positions,market,account:matching?{accountId:matching.accountId}:null};
+ }
+});
+v47Certification.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
