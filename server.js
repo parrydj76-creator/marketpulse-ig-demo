@@ -768,6 +768,15 @@ const v42Workbench=require('./v42-verification').createV42({
 });
 v42Workbench.routes(app);
 
+// V43 independent unattended-readiness rehearsal. Never imports IG order writes.
+const v43Rehearsal=require('./v43-unattended').createV43({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
+ v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
+ v42Status:()=>v42Workbench.status()
+});
+v43Rehearsal.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
