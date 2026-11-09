@@ -1,0 +1,7 @@
+ 'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {verifiedRestMarketState,assessSnapshot,verifyLog}=require('../v37-readiness');
+test('REST and dealing flag separately verified',()=>{const now=Date.now(),rest={epic:'CS.D.EURUSD.CFD.IP',marketStatus:'TRADEABLE'},q={marketState:'DEAL',at:now-100};assert.equal(verifiedRestMarketState(rest,new Date(now-1000).toISOString(),q,now),'TRADEABLE');assert.equal(verifiedRestMarketState(rest,new Date(now-500000).toISOString(),q,now),null);assert.equal(verifiedRestMarketState(rest,new Date(now-1000).toISOString(),{...q,marketState:'UNKNOWN'},now),null);assert.equal(verifiedRestMarketState({...rest,marketStatus:'CLOSED'},new Date(now).toISOString(),q,now),null)});
+test('WAIT signal is rejected without weakening rules',()=>{const r=assessSnapshot({signal:{direction:'WAIT',score:0},feed:{verifiedMarketStatus:'TRADEABLE',dealingFlag:'DEAL',delayed:false,ageMs:50,bid:1.1,ask:1.1001}});assert.equal(r.eligibleForPaperSignal,false);assert.ok(r.reasons.includes('NO_ACTIONABLE_SIGNAL'))});
+test('unknown delay fails closed',()=>{const r=assessSnapshot({signal:{direction:'LONG',score:80,bar:new Date().toISOString()},feed:{verifiedMarketStatus:'TRADEABLE',dealingFlag:'DEAL',delayed:null,ageMs:50,bid:1.1,ask:1.1001}});assert.ok(r.reasons.includes('DELAY_UNKNOWN_OR_TRUE'))});
+test('audit genesis',()=>assert.equal(verifyLog([]),'GENESIS'));
