@@ -754,6 +754,20 @@ const v41Observer=require('./v41-broker-observer').createV41({
 });
 v41Observer.routes(app);
 
+// V42 independent read-only evidence workbench. Broker execution remains disabled.
+const v42Workbench=require('./v42-verification').createV42({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ readBroker:async()=>{
+  const [positionResponse,accountResponse]=await Promise.all([
+   api('/positions','GET',null,'2'),api('/accounts','GET')
+  ]);
+  const matching=(accountResponse.accounts||[]).find(a=>a.accountId===auth?.accountId);
+  return {positions:positionResponse.positions,account:matching?{accountId:matching.accountId}:null};
+ },
+ v36Status:()=>v36Paper.status(),v40Status:()=>v40Protocol.status()
+});
+v42Workbench.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
