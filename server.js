@@ -729,6 +729,9 @@ v36Paper.routes(app);
 // V37: independent diagnostics and durable rejected-evaluation audit; no broker order routes.
 const v37Readiness=require('./v37-readiness').createV37({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v33Status:()=>v33Automation.status(),snapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,reason:a.reason,bars:a.bars,rsi:a.rsi,ema9:a.ema9,ema21:a.ema21,bar:bars.at(-1)?.time||null},feed:{bid:q?.bid??null,ask:q?.ask??null,ageMs:q?Date.now()-q.at:null,source:q?.source??null,dealingFlag:q?.marketState??null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,restMarketStatus:restSnapshot?.marketStatus??null,restAgeMs:restSnapshotAt?Date.now()-Date.parse(restSnapshotAt):null,verifiedMarketStatus:verifiedRestMarketState(restSnapshot,restSnapshotAt,q)}}}});
 v37Readiness.routes(app);
+// V38: isolated, read-only-by-default verification workbench; no IG broker write calls.
+const v38Workbench=require('./v38-verification').createV38({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v33Status:()=>v33Automation.status(),legacyExecutionEnabled:BROKER_DEMO_EXECUTION});
+v38Workbench.routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
