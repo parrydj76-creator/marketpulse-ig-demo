@@ -1,0 +1,10 @@
+'use strict';const {test}=require('node:test'),assert=require('node:assert/strict');const {assess,createV41}=require('../v41-broker-observer');
+const market={snapshot:{marketStatus:'TRADEABLE'},dealingRules:{minDealSize:{value:0.1},minNormalStopOrLimitDistance:{value:5,unit:'POINTS'}}};
+const args={positions:[],market,account:{accountId:'DEMO'},protocol:{protocol:{unresolvedCount:0}},paper:{openPosition:null},at:Date.now()};
+test('clean observation never certifies broker',()=>{let r=assess(args);assert.equal(r.observationHealthy,true);assert.equal(r.brokerOrderAllowed,false);assert.equal(r.gbpSizingCertified,false)});
+test('open broker positions block clean observation',()=>{let r=assess({...args,positions:[{market:{epic:'CS.D.EURUSD.CFD.IP'},position:{direction:'BUY',size:1,dealId:'x'}}]});assert.equal(r.observationHealthy,false);assert.equal(r.eurusdBrokerPositionCount,1)});
+test('stale broker observation fails closed',()=>{let r=assess({...args,at:Date.now()-70000});assert.ok(r.issues.includes('BROKER_SNAPSHOT_STALE'))});
+test('missing dealing rules fail closed',()=>{let r=assess({...args,market:{snapshot:{marketStatus:'TRADEABLE'}}});assert.ok(r.issues.includes('MINIMUM_DEAL_SIZE_UNVERIFIED'))});
+test('unresolved simulated intent flagged',()=>{let r=assess({...args,protocol:{protocol:{unresolvedCount:1}}});assert.ok(r.issues.includes('UNRESOLVED_SIMULATED_INTENTS'))});
+test('paper position explicitly separated from broker',()=>{let r=assess({...args,paper:{openPosition:{id:'paper'}}});assert.equal(r.paperPositionPresent,true);assert.equal(r.brokerPositionCount,0)});
+test('observer never exposes order routes and rate limits refresh',async()=>{let routes=[];let obs=createV41({requireAdmin:()=>{},readBroker:async()=>({positions:[],market,account:{accountId:'DEMO'}}),v36Status:()=>({}),v40Status:()=>({protocol:{unresolvedCount:0}})});obs.routes({get:(p)=>routes.push(p),post:(p)=>routes.push(p)});assert.deepEqual(routes.sort(),['/api/v41/observe','/api/v41/status','/v41'].sort());await obs.refresh();await assert.rejects(()=>obs.refresh(),/RATE_LIMIT/);assert.equal(obs.status().brokerOrderAllowed,false)});
