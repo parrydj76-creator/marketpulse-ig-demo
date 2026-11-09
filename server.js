@@ -787,6 +787,16 @@ const v44Soak=require('./v44-soak').createV44({
 });
 v44Soak.routes(app);
 
+// V45 sequential read-only observation soak with per-cycle diagnostics and evidence.
+const v45Soak=require('./v45-soak').createV45({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
+ v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
+ v42Status:()=>v42Workbench.status(),v44Status:()=>v44Soak.status(),
+ refresh41:()=>v41Observer.refresh(),refresh42:()=>v42Workbench.observe()
+});
+v45Soak.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
