@@ -1,0 +1,8 @@
+const test=require('node:test');const assert=require('node:assert/strict');
+const {assess}=require('../v35-diagnostics');const {evaluateSignal}=require('../v34-orchestrator');
+const feed={marketState:'TRADEABLE',delayed:false,ageMs:100,bid:1.1,ask:1.1001};const signal={direction:'LONG',score:90,bar:'2026-11-09T08:00:00Z'};
+test('v35 shows healthy zero as local journal clear',()=>{const x=assess({storageHealthy:true,persistentStorageConfigured:true,unresolvedIntents:0},{storageHealthy:true,persistentStorageConfigured:true,journal:{valid:true,events:1}},{});assert.equal(x.orderIntentGate,'LOCAL_JOURNAL_CLEAR');assert.equal(x.brokerOrderAllowed,false)});
+test('v35 fails closed for unknown journal',()=>{for(const n of [null,undefined,-1,NaN,'0']){const x=assess({storageHealthy:true,persistentStorageConfigured:true,unresolvedIntents:n},{},{});assert.equal(x.orderIntentGate,'UNKNOWN_BLOCKED')}});
+test('v34 rejects unknown intent state',()=>{for(const n of [null,undefined,-1,NaN,'0']){const x=evaluateSignal(signal,feed,{minScore:75,unresolvedIntents:n,storageHealthy:true});assert.equal(x.decision,'REJECT');assert.ok(x.reasons.includes('ORDER_INTENT_STATUS_UNVERIFIED'))}});
+test('v34 accepts verified zero as paper candidate only',()=>{const x=evaluateSignal(signal,feed,{minScore:75,unresolvedIntents:0,storageHealthy:true});assert.equal(x.decision,'PAPER_CANDIDATE');assert.equal(x.brokerOrderAllowed,false)});
+test('v34 blocks positive unresolved count',()=>{const x=evaluateSignal(signal,feed,{minScore:75,unresolvedIntents:1,storageHealthy:true});assert.ok(x.reasons.includes('UNRESOLVED_ORDER_INTENT'))});
