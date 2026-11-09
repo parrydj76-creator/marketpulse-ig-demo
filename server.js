@@ -721,9 +721,14 @@ const v34Orchestrator=require('./v34-orchestrator').createV34({requireAdmin,api,
 v34Orchestrator.routes(app);
 // V35: read-only integrated safety dashboard. Broker writes are not exposed.
 require('./v35-diagnostics').createV35({requireAdmin,v33Status:()=>v33Automation.status(),v34Status:()=>v34Orchestrator.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic);return {epic,direction:s.direction,score:s.score,marketState:q?.marketState??null,quoteAgeMs:q?Date.now()-q.at:null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true}}}).routes(app);
+// V37: REST market status is distinct from streaming DLG_FLAG. Fail closed if stale/unknown.
+const {verifiedRestMarketState}=require('./v37-readiness');
 // V36: independent persistent paper positions, no IG order writes.
-const v36Paper=require('./v36-paper').createV36({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v33Status:()=>v33Automation.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null},feed:{marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null}}}});
+const v36Paper=require('./v36-paper').createV36({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v33Status:()=>v33Automation.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null},feed:{marketState:verifiedRestMarketState(restSnapshot,restSnapshotAt,q),delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null}}}});
 v36Paper.routes(app);
+// V37: independent diagnostics and durable rejected-evaluation audit; no broker order routes.
+const v37Readiness=require('./v37-readiness').createV37({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v33Status:()=>v33Automation.status(),snapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,reason:a.reason,bars:a.bars,rsi:a.rsi,ema9:a.ema9,ema21:a.ema21,bar:bars.at(-1)?.time||null},feed:{bid:q?.bid??null,ask:q?.ask??null,ageMs:q?Date.now()-q.at:null,source:q?.source??null,dealingFlag:q?.marketState??null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,restMarketStatus:restSnapshot?.marketStatus??null,restAgeMs:restSnapshotAt?Date.now()-Date.parse(restSnapshotAt):null,verifiedMarketStatus:verifiedRestMarketState(restSnapshot,restSnapshotAt,q)}}}});
+v37Readiness.routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
