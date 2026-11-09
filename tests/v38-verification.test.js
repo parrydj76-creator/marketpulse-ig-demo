@@ -1,0 +1,14 @@
+ 'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {verifyChain,verifySizing,evaluateReadiness,assessEvidence,createV38}=require('../v38-verification');
+test('empty evidence chain valid',()=>assert.equal(verifyChain([]),'GENESIS'));
+test('tampered evidence rejected',()=>assert.throws(()=>verifyChain([{previous:'GENESIS',event:{id:'x'},digest:'wrong'}]),/CHAIN_INVALID/));
+test('missing sizing inputs fail closed',()=>assert.equal(verifySizing({}).brokerOrderAllowed,false));
+test('sizing cannot self-certify even with asserted sources',()=>{const r=verifySizing({stopPips:12,pipValueQuotePerContract:10,contractsPerDealUnit:1,gbpPerQuoteUnit:0.77,dealSize:0.1,minimumDealSize:0.1,dealSizeStep:0.1,verifiedContractSource:true,verifiedFxSource:true,verifiedDealingRules:true});assert.equal(r.certified,false);assert.equal(r.brokerOrderAllowed,false);assert.equal(r.provisionalRiskGBP,9.24)});
+test('excess GBP risk rejected',()=>assert.ok(verifySizing({stopPips:12,pipValueQuotePerContract:10,contractsPerDealUnit:1,gbpPerQuoteUnit:0.77,dealSize:1,minimumDealSize:0.1,dealSizeStep:0.1}).reasons.includes('RISK_BUDGET_EXCEEDED')));
+test('deal size step checked',()=>assert.ok(verifySizing({stopPips:12,pipValueQuotePerContract:10,contractsPerDealUnit:1,gbpPerQuoteUnit:0.77,dealSize:0.15,minimumDealSize:0.1,dealSizeStep:0.1}).reasons.includes('DEAL_SIZE_STEP_MISMATCH')));
+test('readiness cannot permit unattended broker trading',()=>assert.equal(evaluateReadiness({}).brokerOrderAllowed,false));
+test('reject unsupported evidence',()=>assert.throws(()=>assessEvidence({kind:'BROKER_ORDER',note:'test'}),/UNSUPPORTED/));
+test('reject blank evidence',()=>assert.throws(()=>assessEvidence({kind:'PAPER_REPLAY_RESULT',note:' '}),/INVALID_NOTE/));
+test('durable evidence persists across restart without certification',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v38-'));try{const args={requireAdmin:(_q,_r,n)=>n(),storageDir:dir,persistentStorage:true,v36Status:()=>({}),v37Status:()=>({}),v33Status:()=>({})};let a=createV38(args);a.record({kind:'PAPER_REPLAY_RESULT',note:'Replay checked'});let b=createV38(args);assert.equal(b.status().evidenceEvents,1);assert.equal(b.status().brokerOrderAllowed,false)}finally{fs.rmSync(dir,{recursive:true,force:true})}});
+test('corrupted persisted chain fails closed',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v38-'));try{fs.writeFileSync(path.join(dir,'v38-verification-evidence.json'),'[{"bad":true}]');const x=createV38({requireAdmin:()=>{},storageDir:dir,persistentStorage:true,v36Status:()=>({}),v37Status:()=>({}),v33Status:()=>({})});assert.equal(x.status().storageHealthy,false);assert.throws(()=>x.record({kind:'PAPER_REPLAY_RESULT',note:'x'}))}finally{fs.rmSync(dir,{recursive:true,force:true})}});
