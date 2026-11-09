@@ -13,7 +13,8 @@ function evaluateSignal(signal,feed,limits={}){
  if(!Number.isFinite(feed?.ageMs)||feed.ageMs<0||feed.ageMs>10000)reasons.push('STALE_FEED');
  if(!Number.isFinite(feed?.bid)||!Number.isFinite(feed?.ask)||feed.bid<=0||feed.ask<=feed.bid)reasons.push('INVALID_SPREAD');
  if(!signal?.bar||!Number.isFinite(Date.parse(signal.bar)))reasons.push('MISSING_BAR');
- if(limits?.unresolvedIntents>0)reasons.push('UNRESOLVED_ORDER_INTENT');
+ if(!Number.isSafeInteger(limits?.unresolvedIntents)||limits.unresolvedIntents<0)reasons.push('ORDER_INTENT_STATUS_UNVERIFIED');
+ else if(limits.unresolvedIntents>0)reasons.push('UNRESOLVED_ORDER_INTENT');
  if(limits?.storageHealthy!==true)reasons.push('PERSISTENCE_NOT_VERIFIED');
  return {decision:reasons.length?'REJECT':'PAPER_CANDIDATE',reasons,brokerOrderAllowed:false};
 }
@@ -43,7 +44,7 @@ function createV34({requireAdmin,api,authInfo,storageDir,persistentStorage=false
  }
  function status(){return {version:'34.0.0',mode:'PAPER_AUTOMATION_ORCHESTRATOR',paperAutomationEnabled:state.enabled,brokerExecution:'HARD_BLOCKED',brokerOrderAllowed:false,unattendedBrokerTradingEnabled:false,storageHealthy:healthy,persistentStorageConfigured:!!persistentStorage,journal:inspectJournal(events),cycles:state.cycles,lastCycle:state.lastCycle,lastDecision:state.lastDecision,checks:{gbpSizingCertified:false,brokerLifecycleCertified:false,crashRecoveryCertified:false},error,warning:'Paper decisions only; no broker order write paths or automatic retries.'};}
  function cycle(){
-  const snap=signalSnapshot();const result=evaluateSignal(snap.signal,snap.feed,{minScore:75,unresolvedIntents:snap.unresolvedIntents||0,storageHealthy:healthy&&persistentStorage});
+  const snap=signalSnapshot();const result=evaluateSignal(snap.signal,snap.feed,{minScore:75,unresolvedIntents:snap.unresolvedIntents,storageHealthy:healthy&&persistentStorage});
   const event={id:crypto.randomUUID(),at:new Date().toISOString(),kind:'PAPER_EVALUATION',epic:String(snap.epic||'').slice(0,60),direction:String(snap.signal?.direction||'UNKNOWN'),bar:snap.signal?.bar||null,decision:result.decision,reasons:result.reasons};
   persist(event);state.cycles++;state.lastCycle=event.at;state.lastDecision=result.decision;return {event,result};
  }

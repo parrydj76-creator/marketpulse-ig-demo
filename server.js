@@ -713,11 +713,17 @@ require('./v30-history').createV30({requireAdmin,api,storageDir:DATA_DIR,persist
 require('./v31-readiness').createV31({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // V32 independent-verification workbench: no broker writes or arming.
 require('./v32-verification').createV32({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
-require('./v33-automation').createV33({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
+const v33Automation=require('./v33-automation').createV33({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE});
+v33Automation.routes(app);
 // V34: restart-disarmed, persistent PAPER signal automation and read-only broker observation.
 const v34Orchestrator=require('./v34-orchestrator').createV34({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
- signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null},feed:{marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null},unresolvedIntents:1};}});
+ signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null},feed:{marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null},unresolvedIntents:(()=>{try{const j=v33Automation.status();return j.storageHealthy===true&&j.persistentStorageConfigured===true&&Number.isSafeInteger(j.unresolvedIntents)&&j.unresolvedIntents>=0?j.unresolvedIntents:null}catch{return null}})()};}});
 v34Orchestrator.routes(app);
+// V35: read-only integrated safety dashboard. Broker writes are not exposed.
+require('./v35-diagnostics').createV35({requireAdmin,v33Status:()=>v33Automation.status(),v34Status:()=>v34Orchestrator.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic);return {epic,direction:s.direction,score:s.score,marketState:q?.marketState??null,quoteAgeMs:q?Date.now()-q.at:null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true}}}).routes(app);
+// V36: independent persistent paper positions, no IG order writes.
+const v36Paper=require('./v36-paper').createV36({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v33Status:()=>v33Automation.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null},feed:{marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null}}}});
+v36Paper.routes(app);
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
