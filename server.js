@@ -1041,6 +1041,30 @@ const v65Candidate=require('./v65-execution-candidate').createV65({
 });
 v65Candidate.routes(app);
 
+// v66 isolated supervised IG DEMO dealing adapter. Disabled by default; never used by legacy automation.
+const v66Dealing=require('./v66-dealing').createV66({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,
+ config:{accountType:process.env.IG_ACCOUNT_TYPE,
+   enableSupervised:process.env.V66_ENABLE_SUPERVISED_IG_DEMO==='true',
+   operatorRiskVerified:process.env.V66_OPERATOR_RISK_VERIFIED==='true'},
+ readBroker:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP')),
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readPaper:()=>v58Paper.state(),
+ submitOpen:payload=>api('/positions/otc','POST',payload,'2'),
+ readConfirm:ref=>api('/confirms/'+encodeURIComponent(ref)),
+ submitClose:async payload=>{if(!auth)throw Error('IG_SESSION_UNAVAILABLE');const headers={
+   'X-IG-API-KEY':process.env.IG_API_KEY||'',CST:auth.cst,
+   'X-SECURITY-TOKEN':auth.xst,VERSION:'1','Content-Type':'application/json',
+   Accept:'application/json','_method':'DELETE'};
+   const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,
+      body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
+   const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data={}};
+   if(!response.ok||data.errorCode)throw Error('IG_CLOSE_FAILED');return data;}
+});
+v66Dealing.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
