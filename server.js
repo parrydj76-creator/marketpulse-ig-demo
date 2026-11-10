@@ -936,6 +936,16 @@ const v55Supervised=require('./v55-supervised').createV55({requireAdmin,storageD
 }});
 v55Supervised.routes(app);
 
+// V56: autonomous shadow/paper decisions only; IG dealing writes remain blocked globally.
+const v56Shadow=require('./v56-shadow').createV56({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,readBroker:async()=>{
+ const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);
+ if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,positions:p.positions.map(x=>({dealId:x.position?.dealId||null,epic:x.market?.epic||null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null}))};
+}});
+v56Shadow.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
