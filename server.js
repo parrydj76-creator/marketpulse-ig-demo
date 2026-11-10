@@ -990,6 +990,16 @@ const v59Certification=require('./v59-certification').createV59({requireAdmin,st
  readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET')});
 v59Certification.routes(app);
 
+// V60: persistent supervised-intent design harness. No IG dealing adapter or broker writes.
+const v60Supervised=require('./v60-supervised').createV60({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyExecutionEnabled:BROKER_DEMO_EXECUTION,v58Status:()=>v58Paper.state(),v59Status:()=>v59Certification.status(),
+ readBroker:async()=>{const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+  if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+  const current=a.accounts.find(x=>x.accountId===auth?.accountId);if(!current)throw Error('IG_ACCOUNT_MISMATCH');
+  return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
+   positions:p.positions.map(x=>({epic:x.market?.epic||null}))};}});
+v60Supervised.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
