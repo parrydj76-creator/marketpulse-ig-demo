@@ -1,4 +1,4 @@
-'use strict';const {test}=require('node:test'),assert=require('node:assert/strict');const {riskPreview,simulate,EPIC}=require('../v50-workbench');
+'use strict';const {test}=require('node:test'),assert=require('node:assert/strict');const {riskPreview,simulate,EPIC}=require('../legacy-bundle').load('./v50-workbench');
 const market={instrument:{epic:EPIC,contractSize:'10000',onePipMeans:'0.0001 USD/EUR',valueOfOnePip:'1.00'},dealingRules:{minDealSize:{value:0.1},minNormalStopOrLimitDistance:{value:2}}};
 const state=()=>({killed:false,unresolved:false,journalHealthy:true,brokerReconciled:true,trades:0,dailyLossGBP:0,seen:[]});
 const order=()=>({type:'PROPOSE',epic:EPIC,idempotencyKey:'intent_12345',certified:true,quoteFresh:true,protectiveStop:true,protectiveLimit:true,riskGBP:2});
