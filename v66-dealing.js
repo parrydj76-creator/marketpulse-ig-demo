@@ -37,7 +37,38 @@ function createV66({requireAdmin,storageDir,persistentStorage,legacyBlocked,read
  async function close(p){if(busy)throw Error('EXECUTION_BUSY');busy=true;try{const q=intents().find(x=>x.id===p.id);if(!q||q.state!=='OPEN'||!q.dealId||p.confirm!==`CLOSE_IG_DEMO_${q.id}`)throw Error('CLOSE_APPROVAL_REQUIRED');if(!enabled()||!healthy||halted()||!legacyBlocked())throw Error('BROKER_WRITE_BLOCKED');const all=await readPositions();const pos=all.find(x=>x.position?.dealId===q.dealId);if(!pos||pos.market?.epic!==EPIC)throw Error('POSITION_NOT_FOUND');append('CLOSE_UNKNOWN',{id:q.id,dealId:q.dealId,at:new Date().toISOString()});let response;try{response=await submitClose({dealId:q.dealId,direction:pos.position.direction==='BUY'?'SELL':'BUY',orderType:'MARKET',size:Number(pos.position.size)})}catch{append('RECONCILE_REVIEW',{id:q.id,reason:'CLOSE_OUTCOME_UNKNOWN'});throw Error('CLOSE_OUTCOME_UNKNOWN_MANUAL_RECONCILIATION_REQUIRED')}if(!response?.dealReference){append('RECONCILE_REVIEW',{id:q.id,reason:'CLOSE_REFERENCE_MISSING'});throw Error('CLOSE_OUTCOME_UNKNOWN')}const conf=await readConfirm(response.dealReference).catch(()=>null);const after=await readPositions().catch(()=>null);if(conf?.dealStatus!=='ACCEPTED'||!Array.isArray(after)||after.some(x=>x.position?.dealId===q.dealId)){append('RECONCILE_REVIEW',{id:q.id,reason:'CLOSE_NOT_VERIFIED'});throw Error('CLOSE_REQUIRES_RECONCILIATION')}append('CONFIRMED_CLOSE',{id:q.id,dealId:q.dealId,at:new Date().toISOString()});return {id:q.id,state:'CLOSED',brokerConfirmed:true}}finally{busy=false}}
  function cancel(p){const q=intents().find(x=>x.id===p.id);if(!q||!['PREPARED','APPROVED'].includes(q.state))throw Error('CANNOT_CANCEL_SUBMITTED_INTENT');append('CANCEL',{id:q.id});return {id:q.id,state:'CANCELLED'}}
  function halt(p){if(p.confirm!=='HALT_V66')throw Error('CONFIRMATION_REQUIRED');append('HALT',{at:new Date().toISOString()});return status()}
- function routes(app){const wrap=fn=>async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req.body||{}))}catch(e){res.status(409).json({error:e.message,unattendedOrderAllowed:false})}};app.get('/api/v66/status',requireAdmin,(_q,r)=>r.set('Cache-Control','no-store').json(status()));app.get('/api/v66/intents',requireAdmin,(_q,r)=>r.json({intents:intents()}));app.post('/api/v66/preflight',requireAdmin,wrap(preflight));app.post('/api/v66/prepare',requireAdmin,wrap(prepare));app.post('/api/v66/approve',requireAdmin,wrap(approve));app.post('/api/v66/execute',requireAdmin,wrap(execute));app.post('/api/v66/close',requireAdmin,wrap(close));app.post('/api/v66/reconcile',requireAdmin,wrap(reconcile));app.post('/api/v66/cancel',requireAdmin,wrap(cancel));app.post('/api/v66/emergency-halt',requireAdmin,wrap(halt));app.post('/api/v66/arm-unattended',requireAdmin,(_q,r)=>r.status(409).json({error:'UNATTENDED_EXECUTION_NOT_CERTIFIED',unattendedOrderAllowed:false}))}
- return {routes,status,preflight,prepare,approve,execute,close,reconcile,halt,intents};
+  async function certificationPreview(){
+   const blockers=['GBP_PIP_VALUE_INDEPENDENT_CERTIFICATION_PENDING','MINI_FRESH_QUOTE_VALIDATION_PENDING'];
+   let market=null,broker=null;
+   try { market=await readMarket(); } catch(e) { blockers.push('MARKET_READ_FAILED'); }
+   try { broker=await readBroker(); } catch(e) { blockers.push('ACCOUNT_READ_FAILED'); }
+   const snap=market?.snapshot||{}, inst=market?.instrument||{}, rules=market?.dealingRules||{};
+   const bid=Number(snap.bid), ask=Number(snap.offer);
+   const validPrices=snap.bid!=null&&snap.offer!=null&&Number.isFinite(bid)&&Number.isFinite(ask)&&bid>0&&ask>bid;
+   const marketEpic=inst.epic||market?.epic||null;
+   if(marketEpic!==EPIC)blockers.push('WRONG_MARKET_EPIC');
+   if(snap.marketStatus!=='TRADEABLE')blockers.push('MARKET_NOT_TRADEABLE');
+   if(!validPrices)blockers.push('INVALID_MINI_BID_ASK');
+   if(broker?.currency!=='GBP'||broker?.accountType!=='CFD')blockers.push('ACCOUNT_NOT_GBP_CFD');
+   const rawPip=inst.valueOfOnePip??null;
+   const pipCurrency=inst.currency??inst.currencies?.[0]?.code??null;
+   // IG updateTime may be clock-only; an HTTP response time is NOT exchange quote freshness.
+   const updateTimeUTC=snap.updateTimeUTC??null;
+   const quoteAgeMs=typeof updateTimeUTC==='string'&&Number.isFinite(Date.parse(updateTimeUTC))?Date.now()-Date.parse(updateTimeUTC):null;
+   const quoteAgeVerified=quoteAgeMs!==null&&quoteAgeMs>=0&&quoteAgeMs<=15000&&Number(snap.delayTime)===0;
+   if(!quoteAgeVerified)blockers.push('EXCHANGE_TIMESTAMP_OR_DELAY_UNVERIFIED');
+   const out={at:new Date().toISOString(),mode:'READ_ONLY_CERTIFICATION_EVIDENCE',epic:marketEpic,accountCurrency:broker?.currency||null,
+     quote:{bid:validPrices?bid:null,ask:validPrices?ask:null,spreadPips:validPrices?Number(((ask-bid)/0.0001).toFixed(2)):null,
+       marketStatus:snap.marketStatus||null,updateTime:snap.updateTime||null,updateTimeUTC,delayTime:snap.delayTime??null,quoteAgeMs,quoteAgeVerified},
+     contract:{contractSize:inst.contractSize??null,valueOfOnePip:rawPip,pipCurrency,
+       minDealSize:rules.minDealSize??null,minStopDistance:rules.minNormalStopOrLimitDistance??null},
+     blockers:[...new Set(blockers)],gbpSizingCertified:false,miniQuoteCertified:false,
+     brokerOrderAllowed:false,unattendedOrderAllowed:false,
+     note:'Evidence only: IG valueOfOnePip units and deal-size mapping are not independently certified; do not enable broker writes.'};
+   if(healthy)append('CERTIFICATION_PREVIEW',out);
+   return out;
+  }
+ function routes(app){const wrap=fn=>async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req.body||{}))}catch(e){res.status(409).json({error:e.message,unattendedOrderAllowed:false})}};app.get('/api/v66/status',requireAdmin,(_q,r)=>r.set('Cache-Control','no-store').json(status()));app.get('/api/v66/intents',requireAdmin,(_q,r)=>r.json({intents:intents()}));app.post('/api/v66/preflight',requireAdmin,wrap(preflight));app.post('/api/v66/certification-preview',requireAdmin,wrap(certificationPreview));app.post('/api/v66/prepare',requireAdmin,wrap(prepare));app.post('/api/v66/approve',requireAdmin,wrap(approve));app.post('/api/v66/execute',requireAdmin,wrap(execute));app.post('/api/v66/close',requireAdmin,wrap(close));app.post('/api/v66/reconcile',requireAdmin,wrap(reconcile));app.post('/api/v66/cancel',requireAdmin,wrap(cancel));app.post('/api/v66/emergency-halt',requireAdmin,wrap(halt));app.post('/api/v66/arm-unattended',requireAdmin,(_q,r)=>r.status(409).json({error:'UNATTENDED_EXECUTION_NOT_CERTIFIED',unattendedOrderAllowed:false}))}
+ return {routes,status,preflight,prepare,approve,execute,close,reconcile,halt,intents,certificationPreview};
 }
 module.exports={createV66};
