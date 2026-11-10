@@ -1065,6 +1065,17 @@ const v66Dealing=require('./v66-dealing').createV66({
 });
 v66Dealing.routes(app);
 
+// v67: isolated, read-only autonomous decision rehearsal. No broker write callbacks.
+const v67Autonomy=require('./v67-autonomy').createV67({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,
+ readBroker:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP')),
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readPaper:()=>v58Paper.state()
+});
+v67Autonomy.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
