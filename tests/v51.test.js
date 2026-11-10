@@ -1,0 +1,7 @@
+'use strict';const test=require('node:test'),assert=require('node:assert/strict');const {calculateRisk,createV51}=require('../v51-evidence');
+const market={instrument:{epic:'CS.D.EURUSD.MINI.IP',contractSize:'10000',onePipMeans:'0.0001 USD/EUR',valueOfOnePip:'1.00'},dealingRules:{minDealSize:{value:0.1},minNormalStopOrLimitDistance:{value:2}}};
+test('Mini preview calculates indicative USD but never certifies',()=>{const r=calculateRisk({market,currency:'GBP'});assert.ok(Math.abs(r.estimatedUSD-1.4)<1e-9);assert.equal(r.certified,false);assert.equal(r.brokerOrderAllowed,false);assert.equal(r.indicativeGBP,null)});
+test('Rejects mismatched contract',()=>{const r=calculateRisk({market:{...market,instrument:{...market.instrument,contractSize:'100000'}},currency:'GBP'});assert.ok(r.issues.includes('MINI_CONTRACT_UNVERIFIED'))});
+test('Rejects stale supplied FX',()=>{const r=calculateRisk({market,currency:'GBP',gbpPerUsd:0.75,fxObservedAt:'2020-01-01T00:00:00Z'});assert.ok(r.issues.includes('FX_RATE_STALE_OR_UNDATED'));assert.equal(r.certified,false)});
+test('Flags over-limit GBP estimates',()=>{const r=calculateRisk({market,currency:'GBP',dealSize:10,gbpPerUsd:0.8,fxObservedAt:new Date().toISOString()});assert.ok(r.issues.includes('RISK_LIMIT_EXCEEDED'))});
+test('No broker write dependency exists',()=>{const fs=require('node:fs');const src=fs.readFileSync(require.resolve('../v51-evidence'),'utf8');assert.ok(!/api\('\/(positions\/otc|workingorders\/otc)/.test(src));assert.match(src,/HARD_BLOCKED/)});
