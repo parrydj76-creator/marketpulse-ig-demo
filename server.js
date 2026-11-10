@@ -830,6 +830,21 @@ const v48Mini=require('./v48-mini').createV48({
 });
 v48Mini.routes(app);
 
+// V49 read-only Mini certification and unattended execution simulation. Never pass broker write access.
+const v49Certification=require('./v49-certification').createV49({
+ requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v47Status:()=>v47Certification.status(),v48Status:()=>v48Mini.status(),
+ readBroker:async()=>{
+  const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+  if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_BROKER_READBACK_INVALID');
+  const current=a.accounts.find(x=>x.accountId===auth?.accountId);
+  if(!current)throw Error('IG_ACCOUNT_MISMATCH');
+  const fingerprint=require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20);
+  return {accountFingerprint:fingerprint,positions:p.positions.map(x=>({dealId:x.position?.dealId||null,epic:x.market?.epic||null,direction:x.position?.direction||null,size:x.position?.size??null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null}))};
+ }
+});
+v49Certification.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
