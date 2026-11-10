@@ -1,4 +1,5 @@
 'use strict';
+const legacyRequire=require('./legacy-bundle').load;
 require('dotenv').config();
 const express=require('express'), path=require('path'), fs=require('fs');
 const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
@@ -10,7 +11,7 @@ const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
 const {createRiskStore}=require('./risk-store');
 const {createPushAlerts}=require('./push-alerts');
-const {createV9Paper}=require('./v9-paper');
+const {createV9Paper}=legacyRequire('./v9-paper');
 if(process.env.IG_ACCOUNT_TYPE!=='DEMO')throw Error('Refusing to start: IG_ACCOUNT_TYPE must equal DEMO');
 const app=express();app.use(express.json({limit:'12kb'}));app.use(express.static(path.join(__dirname,'public')));
 const HOST='https://demo-api.ig.com/gateway/deal';
@@ -613,32 +614,32 @@ app.get('/v9',(_req,res)=>res.sendFile(path.join(__dirname,'public','v9.html')))
 v9Paper.routes(app,requireAdmin);
 void v9Paper.init().catch(e=>console.error('[V9 paper] startup:',e.message));
 // V10 read-only broker readiness and simulation risk audit. No IG dealing endpoints.
-require('./v10-readiness').registerV10(app,requireAdmin,{v9Paper,api,accountSnapshot:()=>account});
+legacyRequire('./v10-readiness').registerV10(app,requireAdmin,{v9Paper,api,accountSnapshot:()=>account});
 // V11 execution engineering laboratory: GET-only IG audit, PostgreSQL paper journal, no broker orders.
-const v11Lab=require('./v11-execution-lab').createExecutionLab({api,v9Paper,requireAdmin});
+const v11Lab=legacyRequire('./v11-execution-lab').createExecutionLab({api,v9Paper,requireAdmin});
 v11Lab.routes(app);
 void v11Lab.init().catch(e=>console.error('[V11 lab] startup:',e.message));
 // V12: authenticated read-only broker evidence and paper lifecycle audits; no broker order operations.
-const v12Validation=require('./v12-validation').createV12({api,v9Paper,requireAdmin});
+const v12Validation=legacyRequire('./v12-validation').createV12({api,v9Paper,requireAdmin});
 v12Validation.routes(app);
 void v12Validation.init().catch(e=>console.error('[V12]',e.message));
 // V13: additive safety lab. Read-only IG calls and persistent preview journal; no broker POST.
-const v13Safety=require('./v13-safety').createV13({api,v9Paper,requireAdmin});
+const v13Safety=legacyRequire('./v13-safety').createV13({api,v9Paper,requireAdmin});
 v13Safety.routes(app);
 void v13Safety.init().catch(e=>console.error('[V13]',e.message));
 // V14 routes must be registered before the legacy dashboard catch-all.
-const v14Lab=require('./v14-lifecycle').createV14({requireAdmin});
+const v14Lab=legacyRequire('./v14-lifecycle').createV14({requireAdmin});
 v14Lab.routes(app);
 void v14Lab.init().catch(e=>console.error('[V14]',e.message));
 // V15: isolated simulated lifecycle rehearsal; no IG API access or broker submissions.
-const v15Lab=require('./v15-rehearsal').createV15({requireAdmin});
+const v15Lab=legacyRequire('./v15-rehearsal').createV15({requireAdmin});
 v15Lab.routes(app);
 void v15Lab.init().catch(e=>console.error('[V15]',e.message));
-const v16Lab=require('./v16-safety').createV16({requireAdmin});
+const v16Lab=legacyRequire('./v16-safety').createV16({requireAdmin});
 v16Lab.routes(app);
 void v16Lab.init().catch(e=>console.error('[V16]',e.message));
 // V17: simulation-only signal rehearsal and risk readiness. Registered before legacy catch-all.
-const v17Lab=require('./v17-readiness').createV17({requireAdmin,signalSnapshot:()=>{
+const v17Lab=legacyRequire('./v17-readiness').createV17({requireAdmin,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
  return {epic,direction:a.direction,score:a.score,reason:a.reason,bar:bars.at(-1)?.time||null,
   quoteAgeMs:q?Date.now()-q.at:null,quoteSource:q?.source||null,marketState:q?.marketState||null,
@@ -648,42 +649,42 @@ v17Lab.routes(app);
 void v17Lab.init().catch(e=>console.error('[V17]',e.message));
 setInterval(()=>{void v17Lab.tick().catch(e=>console.error('[V17 tick]',e.message))},30000);
 // V18 read-only broker readiness; never authorizes or sends IG orders.
-const v18Lab=require('./v18-demo-readiness').createV18({requireAdmin,v17Lab,signalSnapshot:()=>{
+const v18Lab=legacyRequire('./v18-demo-readiness').createV18({requireAdmin,v17Lab,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
  return {epic,direction:a.direction,score:a.score,reason:a.reason,bar:bars.at(-1)?.time||null,quoteAgeMs:q?Date.now()-q.at:null,quoteSource:q?.source||null,marketState:q?.marketState||null,bid:q?.bid??null,ask:q?.ask??null};
 }});
 v18Lab.routes(app);
 // V19: read-only IG DEMO bridge. Does not bypass the broker order hard-block.
-const v19Bridge=require('./v19-demo-bridge').createV19({requireAdmin,api,v17Lab,signalSnapshot:()=>{
+const v19Bridge=legacyRequire('./v19-demo-bridge').createV19({requireAdmin,api,v17Lab,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic);
  return {epic,direction:a.direction,score:a.score,reason:a.reason,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null};
 }});
 v19Bridge.routes(app);
 // V20: fail-closed monetary and broker readiness checks. No broker write requests.
-require('./v20-execution-gates').createV20({requireAdmin,api,signalSnapshot:()=>{
+legacyRequire('./v20-execution-gates').createV20({requireAdmin,api,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic);
  return {direction:a.direction,score:a.score,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null};
 }}).routes(app);
 // V21: fail-closed read-only IG diagnostics and durable simulation journal.
-const v21Engine=require('./v21-engine').createV21({requireAdmin,api,signalSnapshot:()=>{
+const v21Engine=legacyRequire('./v21-engine').createV21({requireAdmin,api,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
  return {direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null,quoteAgeMs:q?Date.now()-q.at:null,quoteSource:q?.source||null};
 }});
 v21Engine.routes(app);
 void v21Engine.init().catch(e=>console.error('[V21]',e.message));
 // V22: persistent simulation lifecycle, read-only reconciliation and restart markers.
-const v22Engine=require('./v22-engine').createV22({requireAdmin,api});
+const v22Engine=legacyRequire('./v22-engine').createV22({requireAdmin,api});
 v22Engine.routes(app);
 void v22Engine.init().catch(e=>console.error('[V22]',e.message));
-const v23Engine=require('./v23-engine').createV23({requireAdmin,api});
+const v23Engine=legacyRequire('./v23-engine').createV23({requireAdmin,api});
 v23Engine.routes(app);
 void v23Engine.init().catch(e=>console.error('[V23]',e.message));
 // V24 read-only evidence and synthetic recovery laboratory. No broker writes.
-const v24Engine=require('./v24-engine').createV24({requireAdmin,api});
+const v24Engine=legacyRequire('./v24-engine').createV24({requireAdmin,api});
 v24Engine.routes(app);
 void v24Engine.init().catch(e=>console.error('[V24]',e.message));
 // V25 autonomous simulation: NO broker write calls or order authorization.
-const v25Autonomy=require('./v25-autonomy').createV25({requireAdmin,signalSnapshot:()=>{
+const v25Autonomy=legacyRequire('./v25-autonomy').createV25({requireAdmin,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];
  return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,
   quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,
@@ -692,55 +693,55 @@ const v25Autonomy=require('./v25-autonomy').createV25({requireAdmin,signalSnapsh
 v25Autonomy.routes(app);
 setInterval(()=>{v25Autonomy.tick((()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null}})())},15000);
 // V26 integrated diagnostics; broker execution remains hard-blocked in this module.
-const v26Readiness=require('./v26-readiness').createV26({requireAdmin,
+const v26Readiness=legacyRequire('./v26-readiness').createV26({requireAdmin,
  simulation:()=>v25Autonomy.status(),
  feed:()=>{const q=quotes.get('CS.D.EURUSD.CFD.IP');return {streamStatus,source:q?.source||null,ageMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true};},
  broker:()=>({brokerReconciled,persistenceHealthy,pendingOrder:!!trade.pendingOrder})
 });
 v26Readiness.routes(app);
 // V27 offline evidence and synthetic failure-injection tests. No broker write paths.
-const v27Lab=require('./v27-execution-lab').createV27({requireAdmin,readiness:()=>v26Readiness.report(),storageDir:DATA_DIR});
+const v27Lab=legacyRequire('./v27-execution-lab').createV27({requireAdmin,readiness:()=>v26Readiness.report(),storageDir:DATA_DIR});
 v27Lab.routes(app);
 // V28 independent-verification preparation: read-only IG evidence, risk math and recovery triage.
 // No IG write API or broker authorization in this module.
-const v28Verification=require('./v28-verification').createV28({requireAdmin,api,
+const v28Verification=legacyRequire('./v28-verification').createV28({requireAdmin,api,
  readLocal:()=>({pendingOrder:trade.pendingOrder,tracked:trade.tracked,persistenceHealthy,brokerReconciled}),
  appendEvidence:(type,details)=>v27Lab.append(type,details)});
 v28Verification.routes(app);
 // V29: observe operator-executed IG demo order lifecycle; never submits orders.
-require('./v29-lifecycle').createV29({requireAdmin,api,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
+legacyRequire('./v29-lifecycle').createV29({requireAdmin,api,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // V30: historical IG DEMO evidence; read-only, broker orders still hard blocked.
-require('./v30-history').createV30({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
-require('./v31-readiness').createV31({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
+legacyRequire('./v30-history').createV30({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
+legacyRequire('./v31-readiness').createV31({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,appendEvidence:(type,details)=>v27Lab.append(type,details)}).routes(app);
 // V32 independent-verification workbench: no broker writes or arming.
-require('./v32-verification').createV32({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
-const v33Automation=require('./v33-automation').createV33({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE});
+legacyRequire('./v32-verification').createV32({requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE}).routes(app);
+const v33Automation=legacyRequire('./v33-automation').createV33({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE});
 v33Automation.routes(app);
 // V34: restart-disarmed, persistent PAPER signal automation and read-only broker observation.
-const v34Orchestrator=require('./v34-orchestrator').createV34({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+const v34Orchestrator=legacyRequire('./v34-orchestrator').createV34({requireAdmin,api,authInfo:()=>auth,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null},feed:{marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null},unresolvedIntents:(()=>{try{const j=v33Automation.status();return j.storageHealthy===true&&j.persistentStorageConfigured===true&&Number.isSafeInteger(j.unresolvedIntents)&&j.unresolvedIntents>=0?j.unresolvedIntents:null}catch{return null}})()};}});
 v34Orchestrator.routes(app);
 // V35: read-only integrated safety dashboard. Broker writes are not exposed.
-require('./v35-diagnostics').createV35({requireAdmin,v33Status:()=>v33Automation.status(),v34Status:()=>v34Orchestrator.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic);return {epic,direction:s.direction,score:s.score,marketState:q?.marketState??null,quoteAgeMs:q?Date.now()-q.at:null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true}}}).routes(app);
+legacyRequire('./v35-diagnostics').createV35({requireAdmin,v33Status:()=>v33Automation.status(),v34Status:()=>v34Orchestrator.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic);return {epic,direction:s.direction,score:s.score,marketState:q?.marketState??null,quoteAgeMs:q?Date.now()-q.at:null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true}}}).routes(app);
 // V37: REST market status is distinct from streaming DLG_FLAG. Fail closed if stale/unknown.
-const {verifiedRestMarketState}=require('./v37-readiness');
+const {verifiedRestMarketState}=legacyRequire('./v37-readiness');
 // V36: independent persistent paper positions, no IG order writes.
-const v36Paper=require('./v36-paper').createV36({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v33Status:()=>v33Automation.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null},feed:{marketState:verifiedRestMarketState(restSnapshot,restSnapshotAt,q),delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null}}}});
+const v36Paper=legacyRequire('./v36-paper').createV36({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v33Status:()=>v33Automation.status(),signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,bar:bars.at(-1)?.time||null},feed:{marketState:verifiedRestMarketState(restSnapshot,restSnapshotAt,q),delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,ageMs:q?Date.now()-q.at:null,bid:q?.bid??null,ask:q?.ask??null}}}});
 v36Paper.routes(app);
 // V37: independent diagnostics and durable rejected-evaluation audit; no broker order routes.
-const v37Readiness=require('./v37-readiness').createV37({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v33Status:()=>v33Automation.status(),snapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,reason:a.reason,bars:a.bars,rsi:a.rsi,ema9:a.ema9,ema21:a.ema21,bar:bars.at(-1)?.time||null},feed:{bid:q?.bid??null,ask:q?.ask??null,ageMs:q?Date.now()-q.at:null,source:q?.source??null,dealingFlag:q?.marketState??null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,restMarketStatus:restSnapshot?.marketStatus??null,restAgeMs:restSnapshotAt?Date.now()-Date.parse(restSnapshotAt):null,verifiedMarketStatus:verifiedRestMarketState(restSnapshot,restSnapshotAt,q)}}}});
+const v37Readiness=legacyRequire('./v37-readiness').createV37({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v33Status:()=>v33Automation.status(),snapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];return {epic,signal:{direction:a.direction,score:a.score,reason:a.reason,bars:a.bars,rsi:a.rsi,ema9:a.ema9,ema21:a.ema21,bar:bars.at(-1)?.time||null},feed:{bid:q?.bid??null,ask:q?.ask??null,ageMs:q?Date.now()-q.at:null,source:q?.source??null,dealingFlag:q?.marketState??null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,restMarketStatus:restSnapshot?.marketStatus??null,restAgeMs:restSnapshotAt?Date.now()-Date.parse(restSnapshotAt):null,verifiedMarketStatus:verifiedRestMarketState(restSnapshot,restSnapshotAt,q)}}}});
 v37Readiness.routes(app);
 // V38: isolated, read-only-by-default verification workbench; no IG broker write calls.
-const v38Workbench=require('./v38-verification').createV38({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v33Status:()=>v33Automation.status(),legacyExecutionEnabled:BROKER_DEMO_EXECUTION});
+const v38Workbench=legacyRequire('./v38-verification').createV38({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v33Status:()=>v33Automation.status(),legacyExecutionEnabled:BROKER_DEMO_EXECUTION});
 v38Workbench.routes(app);
 
-const v39Lifecycle=require('./v39-lifecycle').createV39({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status()});
+const v39Lifecycle=legacyRequire('./v39-lifecycle').createV39({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status()});
 v39Lifecycle.routes(app);
 // V40: offline protocol rehearsal, no broker order transport.
-const v40Protocol=require('./v40-protocol').createV40({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status(),v39Status:()=>v39Lifecycle.status()});
+const v40Protocol=legacyRequire('./v40-protocol').createV40({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v36Status:()=>v36Paper.status(),v37Status:()=>v37Readiness.status(),v38Status:()=>v38Workbench.status(),v39Status:()=>v39Lifecycle.status()});
 v40Protocol.routes(app);
 // V41 read-only broker verification: GET endpoints only, no broker write methods.
-const v41Observer=require('./v41-broker-observer').createV41({
+const v41Observer=legacyRequire('./v41-broker-observer').createV41({
  requireAdmin,
  readBroker:async()=>{
   const [positionResponse,marketResponse,accountResponse]=await Promise.all([
@@ -756,7 +757,7 @@ const v41Observer=require('./v41-broker-observer').createV41({
 v41Observer.routes(app);
 
 // V42 independent read-only evidence workbench. Broker execution remains disabled.
-const v42Workbench=require('./v42-verification').createV42({
+const v42Workbench=legacyRequire('./v42-verification').createV42({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  readBroker:async()=>{
   const [positionResponse,accountResponse]=await Promise.all([
@@ -770,7 +771,7 @@ const v42Workbench=require('./v42-verification').createV42({
 v42Workbench.routes(app);
 
 // V43 independent unattended-readiness rehearsal. Never imports IG order writes.
-const v43Rehearsal=require('./v43-unattended').createV43({
+const v43Rehearsal=legacyRequire('./v43-unattended').createV43({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
  v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
@@ -779,7 +780,7 @@ const v43Rehearsal=require('./v43-unattended').createV43({
 v43Rehearsal.routes(app);
 
 // V44 automated read-only observation soak; never imports IG order submission.
-const v44Soak=require('./v44-soak').createV44({
+const v44Soak=legacyRequire('./v44-soak').createV44({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
  v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
@@ -789,7 +790,7 @@ const v44Soak=require('./v44-soak').createV44({
 v44Soak.routes(app);
 
 // V45 sequential read-only observation soak with per-cycle diagnostics and evidence.
-const v45Soak=require('./v45-soak').createV45({
+const v45Soak=legacyRequire('./v45-soak').createV45({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
  v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
@@ -799,7 +800,7 @@ const v45Soak=require('./v45-soak').createV45({
 v45Soak.routes(app);
 
 // V46 rate-limit-aware, read-only broker soak. Legacy monitors must remain disarmed.
-const v46Soak=require('./v46-soak').createV46({
+const v46Soak=legacyRequire('./v46-soak').createV46({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v36Status:()=>v36Paper.status(),v39Status:()=>v39Lifecycle.status(),
  v40Status:()=>v40Protocol.status(),v41Status:()=>v41Observer.status(),
@@ -810,7 +811,7 @@ const v46Soak=require('./v46-soak').createV46({
 v46Soak.routes(app);
 
 // V47 read-only certification evidence. No broker order write functions are supplied.
-const v47Certification=require('./v47-certification').createV47({
+const v47Certification=legacyRequire('./v47-certification').createV47({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v46Status:()=>v46Soak.status(),
  readBroker:async()=>{
@@ -826,13 +827,13 @@ const v47Certification=require('./v47-certification').createV47({
 v47Certification.routes(app);
 
 // V48 Mini readiness: authenticated IG DEMO market reads only. No broker write adapter.
-const v48Mini=require('./v48-mini').createV48({
+const v48Mini=legacyRequire('./v48-mini').createV48({
  requireAdmin,api,v47Status:()=>v47Certification.status()
 });
 v48Mini.routes(app);
 
 // V49 read-only Mini certification and unattended execution simulation. Never pass broker write access.
-const v49Certification=require('./v49-certification').createV49({
+const v49Certification=legacyRequire('./v49-certification').createV49({
  requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v47Status:()=>v47Certification.status(),v48Status:()=>v48Mini.status(),
  readBroker:async()=>{
@@ -848,7 +849,7 @@ v49Certification.routes(app);
 
 // V50: instrument-specific evidence, restart observations and fail-closed simulation.
 // IMPORTANT: never supply any IG order-write adapter to this module.
-const v50Workbench=require('./v50-workbench').createV50({
+const v50Workbench=legacyRequire('./v50-workbench').createV50({
  requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v49Status:()=>v49Certification.status(),
  readBroker:async()=>{
@@ -866,7 +867,7 @@ const v50Workbench=require('./v50-workbench').createV50({
 v50Workbench.routes(app);
 
 // V51: read-only Mini broker evidence and cross-boot reconciliation. No order-write adapter.
-const v51Evidence=require('./v51-evidence').createV51({
+const v51Evidence=legacyRequire('./v51-evidence').createV51({
  requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  readBroker:async()=>{
   const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
@@ -883,7 +884,7 @@ const v51Evidence=require('./v51-evidence').createV51({
 v51Evidence.routes(app);
 
 // V52: read-only IG history patch.
-const v52Evidence=require('./v52-evidence').createV52({
+const v52Evidence=legacyRequire('./v52-evidence').createV52({
  requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  readBroker:async()=>{
   const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
@@ -924,6 +925,16 @@ const v54Safety=require('./v54-safety').createV54({requireAdmin,storageDir:DATA_
  return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,positions:p.positions.map(x=>({dealId:x.position?.dealId||null,epic:x.market?.epic||null,size:x.position?.size??null,direction:x.position?.direction||null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null}))};
 }});
 v54Safety.routes(app);
+
+// V55 supervised-only evidence and safety verification; broker writes remain centrally blocked.
+const v55Supervised=require('./v55-supervised').createV55({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,readBroker:async()=>{
+ const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);
+ if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,positions:p.positions.map(x=>({dealId:x.position?.dealId||null,epic:x.market?.epic||null,size:x.position?.size??null,direction:x.position?.direction||null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null}))};
+}});
+v55Supervised.routes(app);
 
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
