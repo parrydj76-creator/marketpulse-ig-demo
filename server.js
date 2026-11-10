@@ -1022,6 +1022,25 @@ const v63Combined=require('./v62-63-combined').createCombined({requireAdmin,stor
  readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET')});
 v63Combined.routes(app);
 
+// v64: observe real IG DEMO positions; no order submission or unattended dealing.
+const v64Observer=require('./v64-broker-observer').createV64({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,
+ readAccount:async()=>{const a=await api('/accounts','GET');const current=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!current)throw Error('ACCOUNT_MISMATCH');return {currency:current.currency};},
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('POSITIONS_INVALID');return p.positions;}
+});
+v64Observer.routes(app);
+
+// v65 combined execution candidate: durable supervised rehearsals, recovery drills, and global write block.
+const v65Candidate=require('./v65-execution-candidate').createV65({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,
+ readBroker:async()=>{const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);const current=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!current||!Array.isArray(p.positions))throw Error('IG_READBACK_INVALID');return {currency:current.currency,positions:p.positions};},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET'),
+ readPaper:()=>v58Paper.state()
+});
+v65Candidate.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
