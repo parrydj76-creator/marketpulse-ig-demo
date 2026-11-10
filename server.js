@@ -34,7 +34,7 @@ const REST_POLL_SECONDS=Math.min(600,Math.max(120,Number(process.env.REST_POLL_S
 const REST_MAX_MARKETS=Math.min(2,Math.max(1,Number(process.env.REST_MAX_MARKETS)||1));
 const REST_STALE_MS=REST_POLL_SECONDS*2500;
 // Explicit operator opt-in: defaults to monitor-only even when a user arms the UI.
-const BROKER_DEMO_EXECUTION=process.env.MP_V65_DEMO_EXECUTION==='true' && process.env.ENABLE_IG_DEMO_ORDERS==='true' && process.env.IG_ACCOUNT_TYPE==='DEMO'; // IG DEMO only; multi-engine gates still apply
+const BROKER_DEMO_EXECUTION=false; // v61 GLOBAL fail-closed: broker writes remain disabled irrespective of env settings; // IG DEMO only; multi-engine gates still apply
 const AUTO_START=false; // no legacy auto-start
 const DEMO_EXECUTION_TESTED=process.env.IG_DEMO_ORDER_LIFECYCLE_VERIFIED==='true'; // Set only after observed IG demo open, attached stops, close, restart recovery
 const VERIFIED_MIN_SIZE=Number(process.env.IG_VERIFIED_MIN_SIZE||0); // Must be confirmed against IG /markets dealingRules
@@ -999,6 +999,28 @@ const v60Supervised=require('./v60-supervised').createV60({requireAdmin,storageD
   return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
    positions:p.positions.map(x=>({epic:x.market?.epic||null}))};}});
 v60Supervised.routes(app);
+
+// V61: fail-closed broker readiness, crash rehearsal, and operator-only recovery inspection.
+const v61Readiness=require('./v61-readiness').createV61({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyExecutionEnabled:BROKER_DEMO_EXECUTION,v58Status:()=>v58Paper.state(),v59Status:()=>v59Certification.status(),v60Status:()=>v60Supervised.state(),
+ readBroker:async()=>{const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
+ positions:p.positions.map(x=>({epic:x.market?.epic||null}))};}});
+v61Readiness.routes(app);
+
+// Combined v62/v63: broker readback, risk preview, recovery drills, and certification gates.
+// No dealing POST/PUT/DELETE is exposed; global legacy execution remains blocked.
+const v63Combined=require('./v62-63-combined').createCombined({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyExecutionEnabled:BROKER_DEMO_EXECUTION,v58Status:()=>v58Paper.state(),v59Status:()=>v59Certification.status(),v60Status:()=>v60Supervised.state(),v61Status:()=>v61Readiness.status(),
+ readBroker:async()=>{const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
+ positions:p.positions.map(x=>({epic:x.market?.epic||null}))};},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET')});
+v63Combined.routes(app);
 
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
