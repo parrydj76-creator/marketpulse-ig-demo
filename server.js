@@ -961,6 +961,22 @@ const v57AutoPaper=require('./v57-auto-paper').createV57({requireAdmin,storageDi
  return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
  positions:p.positions.map(x=>({epic:x.market?.epic||null}))};}});
 v57AutoPaper.routes(app);
+// V58: separate quote-based exit monitoring from signal-based paper entries.
+// V57 must be disarmed; V58 imports the existing V57 journal once without altering it.
+const v58Paper=require('./v58-paper').createV58({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v57Status:()=>v57AutoPaper.status(),
+ signalSnapshot:()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
+ const fx=Number(process.env.V57_INDICATIVE_USD_TO_GBP);
+ return {epic,direction:a.direction,score:a.score,bars:a.bars,bar:bars.at(-1)?.time||null,
+ bid:q?.bid??null,ask:q?.ask??null,source:q?.source??null,ageMs:q?Date.now()-q.at:null,
+ delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,marketState:q?.marketState??null,
+ usdToGbp:Number.isFinite(fx)&&fx>0&&fx<=2?fx:null};},
+ readBroker:async()=>{const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,
+ positions:p.positions.map(x=>({epic:x.market?.epic||null}))};}});
+v58Paper.routes(app);
 
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
