@@ -898,6 +898,23 @@ const v52Evidence=require('./v52-evidence').createV52({
 });
 v52Evidence.routes(app);
 
+// V53: read-only broker evidence matching; no broker order-write capability.
+const v53Evidence=require('./v53-evidence').createV53({
+ requireAdmin,api,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ readBroker:async()=>{
+  const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+  if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+  const current=a.accounts.find(x=>x.accountId===auth?.accountId);
+  if(!current)throw Error('IG_ACCOUNT_MISMATCH');
+  const accountFingerprint=require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20);
+  return {accountFingerprint,accountCurrency:current.currency||null,positions:p.positions.map(x=>({
+   dealId:x.position?.dealId||null,epic:x.market?.epic||null,direction:x.position?.direction||null,
+   size:x.position?.size??null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null
+  }))};
+ }
+});
+v53Evidence.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
