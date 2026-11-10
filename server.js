@@ -120,6 +120,7 @@ let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',la
 function log(msg){events.unshift({time:new Date().toISOString(),message:String(msg).slice(0,300)});events.length=Math.min(events.length,100);console.log('[MarketPulse]',msg)}
 function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null}
 async function request(url,method='GET',body=null,version='1'){
+ if(!require('./v54-safety').allowIGRequest(method,url))throw Error('V54_BROKER_WRITE_HARD_BLOCKED');
  const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',VERSION:version,Accept:'application/json'};
  if(auth){headers.CST=auth.cst;headers['X-SECURITY-TOKEN']=auth.xst}
  if(body!==null)headers['Content-Type']='application/json';
@@ -914,6 +915,15 @@ const v53Evidence=require('./v53-evidence').createV53({
  }
 });
 v53Evidence.routes(app);
+
+// V54: central pre-execution workbench; all IG dealing writes hard-blocked in request().
+const v54Safety=require('./v54-safety').createV54({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,readBroker:async()=>{
+ const [p,a]=await Promise.all([api('/positions','GET',null,'2'),api('/accounts','GET')]);
+ if(!Array.isArray(p.positions)||!Array.isArray(a.accounts))throw Error('IG_READBACK_INVALID');
+ const current=a.accounts.find(x=>x.accountId===auth?.accountId);if(!current||current.currency!=='GBP')throw Error('GBP_ACCOUNT_MISMATCH');
+ return {accountFingerprint:require('node:crypto').createHash('sha256').update(current.accountId).digest('hex').slice(0,20),currency:current.currency,positions:p.positions.map(x=>({dealId:x.position?.dealId||null,epic:x.market?.epic||null,size:x.position?.size??null,direction:x.position?.direction||null,stopLevel:x.position?.stopLevel??null,limitLevel:x.position?.limitLevel??null}))};
+}});
+v54Safety.routes(app);
 
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
