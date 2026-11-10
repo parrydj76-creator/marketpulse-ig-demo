@@ -1,0 +1,16 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {assessRisk,simulateOrder,EPIC}=require('../v49-certification');
+const market={instrument:{epic:EPIC,contractSize:'10000',onePipMeans:'0.0001 USD/EUR',valueOfOnePip:'1.00'},dealingRules:{minDealSize:{value:0.1},minNormalStopOrLimitDistance:{value:2}}};
+const state=()=>({kill:false,unresolved:false,journalHealthy:true,brokerReconciled:true,trades:0,dailyLossGBP:0,seen:[]});
+const cmd=()=>({type:'PROPOSE',epic:EPIC,idempotencyKey:'abc',certified:true,quoteFresh:true,protectiveStop:true,protectiveLimit:true,riskGBP:2});
+test('risk preview remains uncertified',()=>{const x=assessRisk({market});assert(Math.abs(x.estimatedUSD-1.4)<1e-9);assert.equal(x.certified,false);assert(x.issues.includes('INDEPENDENT_REVIEW_REQUIRED'))});
+test('missing GBP rate not zero',()=>assert.equal(assessRisk({market}).estimatedGBP,null));
+test('simulated intent does not submit broker order',()=>{const x=simulateOrder(state(),cmd());assert(x.accepted);assert.equal(x.brokerOrderAllowed,false);assert(x.state.unresolved)});
+test('duplicate key rejected',()=>{const s=state();s.seen=['abc'];assert.equal(simulateOrder(s,cmd()).accepted,false)});
+test('kill switch blocks',()=>{const s=state();s.kill=true;assert.equal(simulateOrder(s,cmd()).accepted,false)});
+test('daily limit blocks',()=>{const s=state();s.dailyLossGBP=99;assert.equal(simulateOrder(s,cmd()).accepted,false)});
+test('trade count limit blocks',()=>{const s=state();s.trades=3;assert.equal(simulateOrder(s,cmd()).accepted,false)});
+test('quote and stop prerequisites',()=>{const c=cmd();c.quoteFresh=false;assert.equal(simulateOrder(state(),c).accepted,false);c.quoteFresh=true;c.protectiveStop=false;assert.equal(simulateOrder(state(),c).accepted,false)});
+test('recovery requires broker reconciliation',()=>{assert.equal(simulateOrder(state(),{type:'RECOVER',brokerReadbackConfirmed:false,unresolvedBrokerIntents:0}).accepted,false);assert.equal(simulateOrder(state(),{type:'RECOVER',brokerReadbackConfirmed:true,unresolvedBrokerIntents:1}).accepted,false)});
+test('kill command disarms',()=>{const x=simulateOrder(state(),{type:'KILL'});assert(x.state.kill);assert.equal(x.state.armed,false)});
