@@ -1147,6 +1147,17 @@ const v73Recovery=require('./v73-recovery').createV73({
 v73Recovery.routes(app);
 v73Recovery.start();
 
+// V74: read-only operations centre. No IG order write callback is passed.
+const v74Ops=require('./v74-operations').createV74({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v72:v72Certification,v73:v73Recovery,
+ readPositions:async()=>{const r=await api('/positions','GET',null,'2');if(!Array.isArray(r.positions))throw Error('INVALID_POSITIONS');return r.positions},
+ readAccount:async()=>{const r=await api('/accounts');const a=r.accounts?.find(x=>x.accountId===auth?.accountId);if(!a)throw Error('ACCOUNT_MISMATCH');return {currency:a.currency,accountType:a.accountType,balance:a.balance?.balance??null}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET'),
+ readTransactions:(url,version)=>api(url,'GET',null,version)
+});
+v74Ops.routes(app);v74Ops.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
