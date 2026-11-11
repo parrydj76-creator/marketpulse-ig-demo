@@ -1214,6 +1214,13 @@ const v83Readiness=require('./v83-readiness').createV83({
 });
 v83Readiness.routes(app);
 
+// V84 read-only guardian: no IG broker dealing callback.
+const v84Guardian=require('./v84-guardian').createV84({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v81:v81Simulator,v82:v82Supervisor,v68:v68Controller,v71:v71Engine
+});
+v84Guardian.routes(app);v84Guardian.start();
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
