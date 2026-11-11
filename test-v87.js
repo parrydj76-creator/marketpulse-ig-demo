@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV87,evaluateFeed}=require('./v87-verification');
+const quote={bid:1.1094,ask:1.1095,spreadPips:1,ageMs:100};
+assert.equal(evaluateFeed({streamState:'CONNECTED',quote}).certified,false);
+assert.ok(evaluateFeed({streamState:'CONNECTED',quote}).reasons.includes('EXCHANGE_TIMESTAMP_UNVERIFIED'));
+assert.ok(evaluateFeed({streamState:'CONNECTED',quote:{...quote,ask:0}}).reasons.includes('INVALID_BID_ASK'));
+assert.ok(evaluateFeed({streamState:'DISCONNECTED',quote}).reasons.includes('STREAM_NOT_CONNECTED'));
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mp-v87-'));
+const opts={requireAdmin:(_q,_r,n)=>n(),storageDir:dir,v68:{status:()=>({streamState:'CONNECTED',quote})},v85:{status:()=>({control:{paused:true},quarantinedTrades:3})},v86:{status:()=>({blockers:['exchangeTimestampAndDelayCertified']})}};
+let v=createV87(opts);assert.equal(v.status().evidenceRecords,0);assert.equal(v.status().brokerOrderAllowed,false);v.capture();v=createV87(opts);assert.equal(v.status().evidenceRecords,1);assert.equal(v.status().paperPaused,true);
+fs.appendFileSync(path.join(dir,'v87-evidence.jsonl'),'corruption\n');v=createV87(opts);assert.equal(v.status().evidenceLedgerHealthy,false);assert.throws(()=>v.capture(),/EVIDENCE_LEDGER_UNHEALTHY/);
+fs.rmSync(dir,{recursive:true,force:true});console.log('v87 tests passed');
