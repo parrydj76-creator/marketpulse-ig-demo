@@ -1121,6 +1121,18 @@ const v71Engine=require('./v71-engine').createV71({
 v71Engine.routes(app);
 v71Engine.start();
 
+// V72: independent read-only broker certification and risk sizing workbench.
+// No broker dealing callback is passed; unattended order arming always rejects.
+const v72Certification=require('./v72-certification').createV72({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v69:v69Readiness,v71:v71Engine,
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readAccount:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET')
+});
+v72Certification.routes(app);
+v72Certification.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
