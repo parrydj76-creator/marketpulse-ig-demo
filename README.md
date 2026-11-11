@@ -1,34 +1,30 @@
-# MarketPulse AI v81 — Unattended PAPER Simulation Mega Upgrade
+# MarketPulse AI v82 — Unattended Paper Trading Supervisor
 
-This is an **incremental upgrade for a v80-based repository**. It adds a persistent, autonomous, **paper-only** trade lifecycle. It does **not** certify or enable IG DEMO broker order execution.
+This is an **additive** upgrade to an existing v81 deployment. It does **not** enable IG DEMO broker orders. It does not certify broker monetary sizing, exchange-feed entitlement, daily net P&L or order lifecycle.
 
-## Contents
-- `v81-simulator.js`: standalone paper engine with 15-second scheduled ticks, bid/ask simulated fills, 12-pip stops, 18-pip targets, simulated £25 risk budget, 3 trades/day, simulated £100 daily-loss limit, position restoration, tamper-evident append-only journal and fail-closed persistence.
-- `v81-dashboard.html`: mobile-friendly status screen.
-- `v81-integration-snippet.js.txt`: copy the integration block into existing `server.js` immediately before its catch-all route.
-- `server.js`: **example v80 baseline with v81 integration already inserted**; do not overwrite a diverged production server.
-- `test-v81.js`: isolated mock tests.
+## Files
+- `v82-readiness.js`: read-only health/readiness evaluator, hash-linked audit journal, deterministic offline replay function.
+- `v82-dashboard.html`: mobile-friendly authenticated status view.
+- `v82-integration-snippet.js.txt`: copy the snippet into your existing `server.js` after the v81 block, before catch-all routes.
+- `test-v82.js`: offline tests; run `node test-v82.js`.
 
-## Install
-1. Back up GitHub repository and Render persistent storage.
-2. Upload `v81-simulator.js` and `v81-dashboard.html` alongside `server.js`.
-3. Insert the content of `v81-integration-snippet.js.txt` immediately before the `// Keep the catch-all` line in your existing `server.js`. Only use the supplied full `server.js` if your current server matches the included v80 baseline exactly.
-4. Keep `v54-safety`, all earlier modules and persistence settings. **Set `BROKER_DEMO_EXECUTION=false` and `AUTO_START=false`; check any other legacy dealing flags remain off.** This v81 module does not override legacy routes.
-5. Run `node --check server.js && node --check v81-simulator.js && node test-v81.js`, commit and redeploy.
-6. Open `/v81` or run the commands below.
+## Installation
+1. Back up GitHub repository and persistent disk. Keep existing `server.js`, v54 safety, v68, v71, v80 and v81 modules.
+2. Upload `v82-readiness.js` and `v82-dashboard.html` alongside `server.js`.
+3. Merge the integration snippet exactly once; confirm the v81 variable is named `v81Simulator` (as in the original v81 integration). Do not replace your entire server.
+4. Commit and redeploy to Render. Ensure Render persistent disk remains mounted at the existing `DATA_DIR` and legacy broker execution flags remain disabled.
+5. In Render Shell, test with:
 
-## Render Shell
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v81/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v81/tick" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v82/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v82/audit" | python3 -m json.tool
 ```
 
-## Critical boundaries
-- The simulator uses an **illustrative assumed £1/pip per simulated unit**, NOT a broker-certified Mini contract pip value or dealing size. Its positions and P&L are synthetic and must never be used to calculate actual broker order sizes or certify the £100 broker daily loss limit.
-- Paper fills use observed bid/ask prices at the tick, without guaranteed execution, slippage, financing, commissions or realistic stop gaps. Stops and targets are simulated, not attached at IG.
-- The date diagnostic recognises some additional shapes but does not inspect actual IG transaction dates or establish timezone authority. V80 broker ledger certification remains unchanged.
-- No order write callback is provided. `/api/v81/arm` always rejects. The existing legacy server may contain broker trading functionality; ensure its execution flags remain off independently.
-- Scheduler only runs while the Render service process is alive; sleep, restarts and network interruptions can cause missed simulated exits. The persistent journal restores position state but cannot reconstruct missed prices.
-- The simulator intentionally refuses new entries when persistence, feed, spread, quote age, signal quality or simulated risk gates fail. Simulation risk limits are not a broker safety guarantee.
-- Local tests use mocks; live IG DEMO validation is still required.
+Dashboard `/v82` uses existing authentication. A 403 in the browser means it cannot supply the admin header; use the authenticated API via Render Shell instead.
+
+## Important limitations
+- v82 **supervises** the existing v81 paper engine, and does not modify its execution decisions. The v81 illustrative £1/pip/unit assumption remains uncertified.
+- The replay helper is deterministic and offline, not a historical backtest data fetcher or evidence of real broker fills. Sampled quotes can skip stop levels; it uses the first observed exit quote.
+- v82 does not fix the actual IG transaction date format; real record format/timezone must be independently established before certified net P&L.
+- `certified`, `brokerOrderAllowed`, and `unattendedOrderAllowed` remain false regardless of status. A later supervised, separately approved DEMO lifecycle test is required.

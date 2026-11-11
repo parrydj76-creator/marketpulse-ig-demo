@@ -1,0 +1,8 @@
+// Add once, AFTER the existing v81 integration and BEFORE the catch-all route.
+// Do not remove or bypass v54-safety. No IG broker dealing callback is passed.
+const v82Supervisor=require('./v82-readiness').createV82({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v81:v81Simulator
+});
+v82Supervisor.routes(app);
+v82Supervisor.start();
