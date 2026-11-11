@@ -1192,6 +1192,13 @@ const v80Autonomy=require('./v80-autonomy').createV80({
 });
 v80Autonomy.routes(app);v80Autonomy.start();
 
+// V81 isolated autonomous PAPER simulator. No IG dealing callback supplied.
+const v81Simulator=require('./v81-simulator').createV81({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine
+});
+v81Simulator.routes(app);v81Simulator.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

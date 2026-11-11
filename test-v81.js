@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV81,classifyDate}=require('./v81-simulator');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v81-'));
+let quote={bid:1.1,ask:1.10009,spreadPips:.9,ageMs:80};let signal={direction:'WAIT',score:0};
+const opts={requireAdmin:(_q,_r,next)=>next(),storageDir:dir,persistentStorage:true,v68:{status:()=>({streamState:'CONNECTED',quote})},v71:{status:()=>({signal})}};
+let a=createV81(opts);assert.equal(a.tick().brokerOrderAllowed,false);assert.equal(a.status().position,null);
+signal={direction:'BUY',score:80};a.tick();assert.equal(a.status().position.side,'BUY');const id=a.status().position.id;
+a=createV81(opts);assert.equal(a.status().position.id,id,'restart must restore paper position');
+quote={bid:1.102,ask:1.10209,spreadPips:.9,ageMs:80};a.tick();assert.equal(a.status().position,null);assert.equal(a.status().closedTrades,1);assert.equal(a.status().latestClosed[0].exitReason,'TARGET');
+assert.equal(classifyDate('11-Nov-2026'),'DD_MMM_YYYY_NO_ZONE');assert.equal(classifyDate('2026-11-11T14:30:00Z'),'ISO_OFFSET');
+fs.appendFileSync(path.join(dir,'v81-paper-journal.jsonl'),'bad\n');const bad=createV81(opts);assert.equal(bad.status().journalHealthy,false);assert.throws(()=>bad.tick(),/PERSISTENCE_UNAVAILABLE/);
+console.log('v81 mock tests passed: WAIT, paper entry/exit, restart, date classification, corrupt journal fail-closed');

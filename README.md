@@ -1,33 +1,34 @@
-# MarketPulse AI v80 — Autonomous Read-Only Certification Mega Upgrade
+# MarketPulse AI v81 — Unattended PAPER Simulation Mega Upgrade
 
-**This is a v77 → v80 incremental upgrade, not a fully autonomous IG dealing bot.** It runs automatic read-only audits every 60 seconds, identifies transaction date/P&L formats without exposing raw values, checks live stream and research status, and persists hash-linked evidence. **IG broker orders remain blocked.**
+This is an **incremental upgrade for a v80-based repository**. It adds a persistent, autonomous, **paper-only** trade lifecycle. It does **not** certify or enable IG DEMO broker order execution.
 
-## Files
-- `v80-autonomy.js`: read-only audit, fail-closed certification, transaction format diagnostics, durable journal, scheduled checks.
-- `v80-dashboard.html`: mobile-friendly audit screen (admin token entered locally in browser, not stored).
-- `server.js`: supplied v77 baseline with new v80 integration. **Do not overwrite a diverged server.js.**
-- `test-v80.js`: local unit, audit, restart and corruption tests.
+## Contents
+- `v81-simulator.js`: standalone paper engine with 15-second scheduled ticks, bid/ask simulated fills, 12-pip stops, 18-pip targets, simulated £25 risk budget, 3 trades/day, simulated £100 daily-loss limit, position restoration, tamper-evident append-only journal and fail-closed persistence.
+- `v81-dashboard.html`: mobile-friendly status screen.
+- `v81-integration-snippet.js.txt`: copy the integration block into existing `server.js` immediately before its catch-all route.
+- `server.js`: **example v80 baseline with v81 integration already inserted**; do not overwrite a diverged production server.
+- `test-v81.js`: isolated mock tests.
 
-## Installation
-1. Back up GitHub repo and Render persistent disk. Keep v54 and all prior modules (`v68`, `v71`, `v76`, `v77`, etc.).
-2. Upload `v80-autonomy.js` and `v80-dashboard.html` beside `server.js`.
-3. If your `server.js` is identical to the included v77 baseline, use the included `server.js`. **Otherwise merge only the `// V80 autonomous research and certification` block from the included `server.js`, immediately before the catch-all route.** Never overwrite subsequent fixes.
-4. Run `node --check server.js && node --check v80-autonomy.js && node test-v80.js`.
-5. Commit changes to GitHub and redeploy Render. Ensure `PERSISTENT_STORAGE_CONFIRMED=true` is accurate and the Render disk is mounted. If storage is absent, audit fails closed.
-6. Do not enable `BROKER_DEMO_EXECUTION`, `AUTO_START`, or any legacy execution flag. Preserve `v54-safety` and existing protections.
+## Install
+1. Back up GitHub repository and Render persistent storage.
+2. Upload `v81-simulator.js` and `v81-dashboard.html` alongside `server.js`.
+3. Insert the content of `v81-integration-snippet.js.txt` immediately before the `// Keep the catch-all` line in your existing `server.js`. Only use the supplied full `server.js` if your current server matches the included v80 baseline exactly.
+4. Keep `v54-safety`, all earlier modules and persistence settings. **Set `BROKER_DEMO_EXECUTION=false` and `AUTO_START=false`; check any other legacy dealing flags remain off.** This v81 module does not override legacy routes.
+5. Run `node --check server.js && node --check v81-simulator.js && node test-v81.js`, commit and redeploy.
+6. Open `/v81` or run the commands below.
 
-## Render test
+## Render Shell
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v80/audit" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v80/status" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v81/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v81/tick" | python3 -m json.tool
 ```
-Dashboard: `/v80`. Evidence: `GET /api/v80/evidence`. Arm: `POST /api/v80/arm` always HTTP 409.
 
-## Explicit limitations
-- The known working IG v1 seven-day endpoint returns data but does **not** establish completeness/pagination. No certified daily net GBP P&L or enforceable £100 broker loss cap yet.
-- Date-only or timezone-free IG dates are classified, not converted to UK time. Format classification is **not** timezone verification.
-- GBP pip value, deal increments, fees, financing, feed entitlement/delay, broker stop attachment, uncertain-submit recovery and supervised broker lifecycle remain uncertified.
-- `simulationCandidateEligible` is a **research readiness flag**, not a simulated trade or permission to trade. V80 does not submit orders, create simulated fills, or manage simulated positions. No real DEMO broker test trades are performed.
-- This package does not certify or remove any historical legacy execution paths. Existing execution flags must stay off.
-- Locally tested with mocks only; actual IG DEMO validation requires running the audit after deployment.
+## Critical boundaries
+- The simulator uses an **illustrative assumed £1/pip per simulated unit**, NOT a broker-certified Mini contract pip value or dealing size. Its positions and P&L are synthetic and must never be used to calculate actual broker order sizes or certify the £100 broker daily loss limit.
+- Paper fills use observed bid/ask prices at the tick, without guaranteed execution, slippage, financing, commissions or realistic stop gaps. Stops and targets are simulated, not attached at IG.
+- The date diagnostic recognises some additional shapes but does not inspect actual IG transaction dates or establish timezone authority. V80 broker ledger certification remains unchanged.
+- No order write callback is provided. `/api/v81/arm` always rejects. The existing legacy server may contain broker trading functionality; ensure its execution flags remain off independently.
+- Scheduler only runs while the Render service process is alive; sleep, restarts and network interruptions can cause missed simulated exits. The persistent journal restores position state but cannot reconstruct missed prices.
+- The simulator intentionally refuses new entries when persistence, feed, spread, quote age, signal quality or simulated risk gates fail. Simulation risk limits are not a broker safety guarantee.
+- Local tests use mocks; live IG DEMO validation is still required.
