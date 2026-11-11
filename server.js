@@ -1197,7 +1197,7 @@ const v81Simulator=require('./v81-simulator').createV81({
  requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
  v68:v68Controller,v71:v71Engine
 });
-v81Simulator.routes(app);v81Simulator.start();
+v81Simulator.routes(app); // v86: no automatic paper scheduler; fail-closed until reviewed
 
 // Keep the catch-all after every versioned dashboard and API route.
 // V82 broker-write-free supervisor. Routes must precede catch-all.
@@ -1224,6 +1224,9 @@ v84Guardian.routes(app);v84Guardian.start();
 // V85 paper-only integrity audit and persistent safety hold. No IG dealing callback.
 const v85IntegrityController=require('./v85-integrity').createV85({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v81:v81Simulator,v68:v68Controller});
 v85IntegrityController.routes(app);
+// V86: read-only unattended-demo readiness; no IG dealing callbacks.
+const v86Readiness=require('./v86-readiness').createV86({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v81:v81Simulator,v68:v68Controller,v85:v85IntegrityController});
+v86Readiness.routes(app);
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

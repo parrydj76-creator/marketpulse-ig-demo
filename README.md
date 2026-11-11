@@ -1,40 +1,29 @@
-# MarketPulse AI v85 — Direct GitHub Upload
+# MarketPulse AI v86 — Mega Safety & Readiness Upgrade
 
-This package is based on the user's supplied current `server.js` (v84 integrated) and the supplied `v81-simulator.js` source. The two files are already patched and named exactly as required. **No installer or renaming is needed.**
+## Upload directly to GitHub
 
-## Files to upload to the ROOT of the existing GitHub repository
-- `server.js` — replacement for existing server, preserving v81–v84 integrations and registering `/api/v85/*` before the catch-all route.
-- `v81-simulator.js` — replacement simulator with persistent fail-closed safety hold, guarded quote exits and corrected daily trade counting.
-- `v85-integrity.js` — new dependency; validates and quarantines invalid historical paper exits without modifying the existing journal.
+This package is based on the exact v85 GitHub-ready server and simulator files previously supplied. **Back up your repository and persistent Render disk before deploying.** Upload `server.js`, `v81-simulator.js`, `v85-integrity.js`, and `v86-readiness.js` to the existing repository root. Keep all other modules and `public/` assets in place. Commit and redeploy Render. Do not upload the ZIP itself to Render.
 
-`test-v85.js` and `test-v85-integration.js` are optional offline tests; they do not need to be deployed. `README.md` is informational.
+## What changed
 
-## Before deployment
-1. Back up your GitHub project and the Render persistent `DATA_DIR`, especially `v81-paper-journal.jsonl`.
-2. Upload/replace the THREE production JS files above **together in one GitHub commit**. Preserve all other project files and dependencies.
-3. Keep `BROKER_DEMO_EXECUTION=false` and `AUTO_START=false`; v85 does not certify IG broker execution.
-4. Redeploy Render and check the new routes.
+- Removed the automatic `v81Simulator.start()` invocation from active `server.js` so the background paper timer is **not scheduled** on startup.
+- Preserved the v85 fail-closed persistent pause and immutable hash-linked journal.
+- Replaced the misleading legacy `lastDecision.simulatedDailyPnlGBP` display with the v85 validated paper P&L and marked it `legacyDecisionPnlUntrusted`. Original journal records remain unchanged.
+- Added `/api/v86/status` and `/api/v86/readiness` (admin token required): explicit diagnostic gate matrix for feed quality, broker accounting, contract risk, protective stops, recovery, and concurrency.
+- `/api/v86/arm` always returns HTTP 409; broker order execution and auto-start remain hard blocked.
+- Tests: `node test-v85.js`, `node test-v85-integration.js`, `node test-v86.js` (the v85 integration test may require its existing arguments; see source).
 
-## Render checks
-```sh
+## Verify in Render Shell
+
+```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v85/status" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v81/status" | python3 -m json.tool
-```
-The v85 status should report `control.paused: true` by default, with invalid zero-price trades quarantined, and `brokerOrderAllowed: false`. The v81 scheduler may still say `scheduled: true`, but its ticks are blocked by the persistent pause. Do not manually call `/api/v81/tick` or `/api/v85/resume` while investigating historical errors. Existing paper positions remain open/frozen during pause. A paused simulator does not monitor simulated stop prices.
-
-## Offline tests
-```sh
-node --check server.js
-node --check v81-simulator.js
-node test-v85.js
-node test-v85-integration.js
+curl -fsS -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v86/status" | python3 -m json.tool
+curl -fsS -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v85/status" | python3 -m json.tool
+curl -fsS -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v81/status" | python3 -m json.tool
 ```
 
-## Known limitations
-- v85 quarantines invalid trades from **validated** P&L but does not erase or rewrite original immutable journal entries; old `latestClosed` may still show raw invalid entries for audit.
-- P&L is simulated, uses an uncertified GBP/pip assumption, and excludes fees, slippage, gaps and financing.
-- Resuming paper simulation is not recommended until operator verification; the v85 pause endpoint is `/api/v85/pause` and guarded resume is `/api/v85/resume`.
-- The v84 guardian is read-only and does not pause the v81 scheduler.
-- IG quote delay, GBP pip sizing, daily net broker P&L, stop lifecycle and unknown-submit recovery remain uncertified. IG broker orders stay blocked.
-- This ZIP contains only changed/new files; it is not a complete repository. It depends on the user's existing modules.
+Expect `paperPaused:true`, `paperSchedulerRunning:false`, `brokerOrderAllowed:false`, `readyForUnattendedDemo:false`, `journalRecords:205` if your journal remains unchanged, and three quarantined historical trades. The v81 `latestClosed` list still contains original bad records for audit; **do not treat those raw P&L values as valid**. The corrected v81 `lastDecision.simulatedDailyPnlGBP` excludes invalid trades for the recorded UK day, but is not certified broker P&L; rely on v85/v86 validated totals.
+
+## Important limits
+
+This is a diagnostic safety upgrade **towards** unattended IG DEMO trading, not an automated broker execution release. No real or demo broker orders are enabled. The v85 `/api/v85/resume` route still exists and can remove the pause after its checks; do not call it until the simulator and broker data have been independently verified. Even after resuming, this release does not start the background simulator. No broker feed delay, exchange timestamps, GBP pip value, fees, stop orders, unknown-submit reconciliation or crash recovery are certified here. Do not change `BROKER_DEMO_EXECUTION=false` or `AUTO_START=false`.
