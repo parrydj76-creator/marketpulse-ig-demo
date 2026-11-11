@@ -1,0 +1,10 @@
+'use strict';const assert=require('node:assert/strict');const fs=require('node:fs'),os=require('node:os'),path=require('node:path');const {createV84,snapshot,replay,validQuote}=require('./v84-guardian');
+const good={streamState:'CONNECTED',quote:{bid:1.1092,ask:1.10929,ageMs:40,spreadPips:0.9}};
+assert.equal(validQuote(good.quote,good),true);assert.equal(validQuote({bid:0,ask:0,ageMs:0,spreadPips:0},good),false);assert.equal(validQuote({...good.quote,ageMs:16000},good),false);
+const paper={journalHealthy:true,scheduled:true,lastTickAt:new Date().toISOString(),closedTrades:0};const supervisor={supervisorJournalHealthy:true};assert.equal(snapshot({paper,stream:good,research:{signal:{direction:'SELL',score:70}},supervisor}).paperOperational,true);
+assert.equal(snapshot({paper,stream:{...good,quote:{bid:0,ask:0,ageMs:0,spreadPips:0}},research:{},supervisor}).paperOperational,false);
+const start=Date.now(),q=(i,bid,ask)=>({ts:start+i*1000,bid,ask});const stop=replay({quotes:[q(0,1.1092,1.10929),q(1,1.1104,1.1105)]});assert.equal(stop.exit.reason,'STOP');assert.ok(stop.pnlPips<0);
+const target=replay({quotes:[q(0,1.1092,1.10929),q(1,1.1071,1.1072)]});assert.equal(target.exit.reason,'TARGET');assert.ok(target.pnlPips>0);
+assert.throws(()=>replay({quotes:[q(0,1.1,1.2),q(0,1.1,1.2)]}),/INVALID_REPLAY_QUOTE/);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v84-'));const deps={requireAdmin:(_q,_r,n)=>n(),storageDir:dir,persistentStorage:true,v81:{status:()=>paper},v82:{current:()=>supervisor},v68:{status:()=>good},v71:{status:()=>({signal:{direction:'SELL',score:70}})}};
+let a=createV84(deps);assert.equal(a.status().guardianJournalHealthy,true);assert.equal(a.audit().guardianRecords,1);a=createV84(deps);assert.equal(a.status().guardianRecords,1);fs.appendFileSync(path.join(dir,'v84-guardian-journal.jsonl'),'bad\n');a=createV84(deps);assert.equal(a.status().guardianJournalHealthy,false);assert.throws(()=>a.audit(),/UNHEALTHY/);fs.rmSync(dir,{recursive:true,force:true});console.log('PASS v84 quote validation, BUY/SELL-side replay, persistence, corrupt-journal fail-closed');
