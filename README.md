@@ -1,37 +1,35 @@
-# MarketPulse AI v76 — Combined v75 + v76 upgrade
+# MarketPulse AI v77 — Broker Certification Workbench
 
-## Scope
-This is an **incremental** upgrade for the existing MarketPulse AI GitHub/Render repository, based on the previously supplied v74 `server.js`. It is **not** a complete standalone project. Preserve all existing files, dependencies, environment variables, persistent disks and journal data.
+Incremental v76 → v77 upgrade. **READ-ONLY. No IG broker order writes.**
 
-### Included
-- `server.js`: v74 baseline plus v76 module wiring, before the catch-all route.
-- `v76-workbench.js`: read-only IG account/position/market checks; bounded transaction endpoint probes; structured safe errors; feed/research quality gates; policy readiness; persistent hash-chained audit and simulated-candidate journal.
-- `v76-dashboard.html`: admin-protected mobile-friendly diagnostics.
-- `test-v76.js`: Node built-in assert tests, including restart and journal corruption.
-- `v73-recovery.js`, `v74-operations.js`, `v74-dashboard.html`: included baseline files for reproducibility; only replace these if your GitHub version is older than the v74 package.
+## Contents
+- `server.js`: v76 baseline plus v77 integration (use only if unchanged since v76; otherwise merge the `// V77 read-only` block).
+- `v77-certification.js`: read-only v1 transaction history; UK date and provisional gross P&L parser; fee and pagination fail-closed diagnostics; Mini pip-value research; Lightstreamer timestamp research; supervised lifecycle evidence checklist; durable hash-linked journal; scheduled 60-second audits; permanently blocked arm endpoint.
+- `v77-dashboard.html`: authenticated mobile-readable status page.
+- `test-v77.js`: mock unit, restart and corruption tests.
 
 ## Installation
-1. Back up the GitHub repository and persistent disk data. Do not replace/delete journal files.
-2. Upload `server.js`, `v76-workbench.js`, `v76-dashboard.html` into the existing repository root (`src/` if that is where `server.js` lives). **Use the included `server.js` only if your current GitHub server.js is the same v74 baseline**; otherwise merge only the `// V76 combined` block immediately before the catch-all route.
-3. Keep all prior `v68` through `v74` modules, `v54-safety.js`, and existing dependencies.
-4. Run `node --check server.js && node --check v76-workbench.js && node test-v76.js`.
-5. Commit to GitHub and deploy Render. Render Shell edits alone are not persistent.
-6. Open `/v76` through your existing authenticated browser session.
+1. Back up your GitHub repo and persistent Render disk. Do not delete existing journal files.
+2. Upload `v77-certification.js` and `v77-dashboard.html` beside `server.js`.
+3. Replace `server.js` **only if** your GitHub file matches the v76 package. Otherwise merge only the `// V77 read-only broker certification` block before the catch-all route.
+4. Keep all prior v54 safety and v68/v71/v73/v74/v76 modules. Never enable legacy execution flags.
+5. Run `node --check server.js && node --check v77-certification.js && node test-v77.js`.
+6. Commit to GitHub, deploy via Render. Shell edits alone will not persist.
 
-## Shell checks (never paste secrets)
+## Render tests
 ```
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v76/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v76/audit" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v76/simulate" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v77/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v77/audit" | python3 -m json.tool
 ```
+`GET /api/v77/evidence` and authenticated `/v77` are also available. `POST /api/v77/arm` always returns 409.
 
-## Important limitations
-- v76 does **not** place, amend, or close IG orders. `POST /api/v76/arm` always rejects.
-- Transactions are diagnostic probes, not certified pagination or a complete GBP financial ledger. A successful HTTP response does not certify daily P&L.
-- Read-only checks and simulation are not proof of broker-side risk enforcement.
-- Feed delay `null` is unverified. A fresh server receipt is not proof of an undelayed exchange price.
-- The existing v74 endpoint may still report a truncated `IG` error code; v76 has its own diagnostics. IG HTTP 500 may remain unresolved until actual responses can be inspected.
-- `v76/simulate` records a **candidate**, not a fill or profit. It does not perform live automated trading.
-- This package has been syntax-checked and mock-tested locally, not verified against your running IG DEMO/Render service.
-- The legacy `server.js` contains older execution pathways; keep the pre-existing v54 broker-write hard block in place and do not set broker execution flags. This upgrade does not independently audit all legacy execution paths.
+## Safety limitations and interpretation
+- IG v1 `/history/transactions/ALL/604800000` is the observed working endpoint. v77 uses it as a bounded read-only query, not as a certified complete ledger.
+- Transaction dates without explicit UTC offset are rejected for daily accounting. This is intentional: IG's observed `date` format is not yet established, so the reported observed gross P&L may be zero even if records exist. Do **not** interpret zero as no losses.
+- `observedTodayGrossPnlGBP` is provisional, not net daily P&L. Fees, financing, missing pages, adjustments, deposits, withdrawals and account-balance reconciliation remain uncertified. `netDailyPnlGBP` and `brokerDailyPnlGBP` stay null; daily loss enforcement remains false.
+- GBP pip value and permissible deal-size increments cannot be independently certified using market metadata alone. `illustrativeMaximumGBPPerPip` is a mathematical bound, not a validated deal size.
+- Receipt versus IG timestamp is diagnostic only. Delay `null` is not proof of zero delay or an authoritative exchange timestamp.
+- No supervised DEMO open/stop/close orders are sent. Unknown-submit recovery is not certified by simulated journal tests. The lifecycle checklist names the remaining tests requiring explicit operator approval and separate safeguards.
+- All new module endpoints are admin-protected. The pre-existing legacy server contains broker execution paths; do not change its v54 hard block or execution configuration. This package does not audit all historical execution code.
+- Tested locally with mock data, not yet against the live IG DEMO broker or Render deployment.
