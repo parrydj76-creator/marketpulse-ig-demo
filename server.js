@@ -1076,6 +1076,25 @@ const v67Autonomy=require('./v67-autonomy').createV67({
 });
 v67Autonomy.routes(app);
 
+// v68: independent EUR/USD Mini Lightstreamer observer and 60-second durable simulation.
+// NO broker submission callbacks are passed to this module.
+const v68Controller=require('./v68-controller').createV68({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,
+ readBroker:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP')),
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readPaper:()=>v58Paper.state(),
+ getSession:()=>auth?{streamUrl:auth.streamUrl,accountId:auth.accountId,cst:auth.cst,xst:auth.xst}:null
+});
+v68Controller.routes(app);
+v68Controller.start();
+// Stream session may not be available until IG login completes.
+const v68StreamTimer=setInterval(()=>{if(auth&&v68Controller.status().streamState==='DISCONNECTED'){
+ try{v68Controller.startStream()}catch(e){log('V68 Mini stream: '+e.message)}
+}},30000);
+if(v68StreamTimer.unref)v68StreamTimer.unref();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

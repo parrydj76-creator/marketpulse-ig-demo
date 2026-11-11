@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),Module=require('node:module');
+const original=Module._load;
+Module._load=function(request,parent,isMain){if(request==='lightstreamer-client-node')return {LightstreamerClient:class{},Subscription:class{}};return original.apply(this,arguments)};
+const {createV68}=require('./v68-controller');Module._load=original;
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'marketpulse-v68-'));
+const market={instrument:{epic:'CS.D.EURUSD.MINI.IP',contractSize:'10000',valueOfOnePip:'1.00'},dealingRules:{minDealSize:{unit:'POINTS',value:0.1}}};
+const make=(storageDir=dir)=>createV68({requireAdmin:(_q,_r,next)=>next(),storageDir,persistentStorage:true,legacyBlocked:()=>true,readBroker:async()=>({currency:'GBP',accountType:'CFD'}),readMarket:async()=>market,readPositions:async()=>[],readPaper:()=>({entryArmed:false,monitorArmed:false,openPaperPositions:0}),getSession:()=>null});
+(async()=>{
+ let a=make();assert.equal(a.status().journalHealthy,true);assert.equal(a.status().brokerOrderAllowed,false);assert.equal(a.status().unattendedOrderAllowed,false);assert(a.quoteStatus().issues.includes('NO_MINI_STREAM_QUOTE'));
+ const e=await a.sizingEvidence();assert.equal(e.certified,false);assert.equal(e.verifiedGbpPerPip,null);
+ const l=await a.lifecycleEvidence();assert.equal(l.brokerPositions.length,0);assert.equal(l.actualOpenCloseTestCompleted,false);
+ const c=await a.cycle();assert.equal(c.action,'NO_ACTION');assert.equal(c.brokerOrderAllowed,false);
+ assert.equal(a.status().journalRecords,1);a=make();assert.equal(a.status().journalHealthy,true);assert.equal(a.status().journalRecords,1);
+ process.env.V68_ENABLE_CRASH_DRILL='true';const drill=a.injectTestUnknown({confirm:'INJECT_FAKE_UNKNOWN_INTENT'});assert.equal(drill.simulated,true);
+ a=make();assert.deepEqual(a.status().unresolvedBrokerIntents,[drill.id]);const after=await a.cycle();assert(after.issues.includes('UNKNOWN_BROKER_INTENT'));
+ assert.throws(()=>a.injectTestUnknown({confirm:'INJECT_FAKE_UNKNOWN_INTENT'}),/UNRESOLVED_INTENT/);
+ const halt=a.status().emergencyHalt;assert.equal(halt,false);assert.equal(a.status().cycleScheduled,false);
+ const h=a.status();assert.equal(h.brokerOrderAllowed,false);
+ const journal=path.join(dir,'v68-controller.jsonl');fs.appendFileSync(journal,'broken');const corrupt=make();assert.equal(corrupt.status().journalHealthy,false);
+ console.log('PASS: 17 assertions/checks: read-only, sizing, lifecycle, journal restart, unknown-intent blocking, corruption');
+})().catch(e=>{console.error(e);process.exitCode=1});
