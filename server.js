@@ -1158,6 +1158,18 @@ const v74Ops=require('./v74-operations').createV74({
 });
 v74Ops.routes(app);v74Ops.start();
 
+// V76 combined read-only broker diagnostics and durable simulation workbench.
+// No IG broker write callback is passed. The v54 hard block remains unchanged.
+const v76Workbench=require('./v76-workbench').createV76({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v74:v74Ops,
+ readPositions:async()=>{const r=await api('/positions','GET',null,'2');if(!Array.isArray(r.positions))throw Error('INVALID_POSITIONS');return r.positions},
+ readAccount:async()=>{const r=await api('/accounts');const a=r.accounts?.find(x=>x.accountId===auth?.accountId);if(!a)throw Error('ACCOUNT_MISMATCH');return {currency:a.currency,accountType:a.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET'),
+ readTransactions:(url,version)=>api(url,'GET',null,version)
+});
+v76Workbench.routes(app);v76Workbench.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
