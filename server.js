@@ -1221,6 +1221,10 @@ const v84Guardian=require('./v84-guardian').createV84({
 });
 v84Guardian.routes(app);v84Guardian.start();
 
+// V85 paper-only integrity audit and persistent safety hold. No IG dealing callback.
+const v85IntegrityController=require('./v85-integrity').createV85({requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,v81:v81Simulator,v68:v68Controller});
+v85IntegrityController.routes(app);
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

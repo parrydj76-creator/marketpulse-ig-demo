@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const {createV81}=require('./v81-simulator.v85.example');
+const {createV81}=require('./v81-simulator');
 const {setControl,audit}=require('./v85-integrity');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mp85-int-'));
 let feed='CONNECTED',bid=1.1094,ask=1.1095;
