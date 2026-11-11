@@ -1,30 +1,36 @@
-# MarketPulse AI v82 — Unattended Paper Trading Supervisor
+# MarketPulse AI v83 — v82 Route Repair + Readiness Diagnostics
 
-This is an **additive** upgrade to an existing v81 deployment. It does **not** enable IG DEMO broker orders. It does not certify broker monetary sizing, exchange-feed entitlement, daily net P&L or order lifecycle.
+## Why
+Your Render output showed `v82-readiness.js` and the v82 dashboard existed, but **no v82 route was registered in server.js**. `/api/v82/status` returned the legacy HTML catch-all and `/api/v82/audit` returned HTTP 404. This upgrade adds the missing v82 routes and a separate v83 diagnostic endpoint **before** the catch-all.
 
-## Files
-- `v82-readiness.js`: read-only health/readiness evaluator, hash-linked audit journal, deterministic offline replay function.
-- `v82-dashboard.html`: mobile-friendly authenticated status view.
-- `v82-integration-snippet.js.txt`: copy the snippet into your existing `server.js` after the v81 block, before catch-all routes.
-- `test-v82.js`: offline tests; run `node test-v82.js`.
+## Contents
+- `install-v83.js`: guarded, idempotence-aware integration generator. Reads your current `server.js` and writes `server.v83.js` (does not overwrite the original). Requires the known v81 anchor; refuses unrecognised layouts.
+- `v82-readiness.js`, `v82-dashboard.html`: existing supervisor components.
+- `v83-readiness.js`, `v83-dashboard.html`: read-only cross-version readiness checks.
+- `server.v83.js`: **example integrated server based on the supplied v81 baseline**, NOT necessarily your current server. Use the patcher against your actual repository server.js instead.
+- `test-v83.js`: mock tests.
 
-## Installation
-1. Back up GitHub repository and persistent disk. Keep existing `server.js`, v54 safety, v68, v71, v80 and v81 modules.
-2. Upload `v82-readiness.js` and `v82-dashboard.html` alongside `server.js`.
-3. Merge the integration snippet exactly once; confirm the v81 variable is named `v81Simulator` (as in the original v81 integration). Do not replace your entire server.
-4. Commit and redeploy to Render. Ensure Render persistent disk remains mounted at the existing `DATA_DIR` and legacy broker execution flags remain disabled.
-5. In Render Shell, test with:
+## Install (GitHub repository, NOT Render Shell)
+1. Back up current `server.js` and persistent storage. Confirm Render broker execution flags are OFF (`BROKER_DEMO_EXECUTION=false`, `AUTO_START=false`, and any legacy broker-enable flags OFF). Keep v54 safety in place.
+2. Add `v82-readiness.js`, `v82-dashboard.html`, `v83-readiness.js`, `v83-dashboard.html`, `install-v83.js` to the same directory as `server.js`.
+3. In a local checkout or GitHub Codespace, run `node install-v83.js server.js server.v83.js`.
+4. Review the diff: `diff -u server.js server.v83.js`. Ensure the only addition is v82/v83 integration before the catch-all. Run `node --check server.v83.js` and `node test-v83.js`.
+5. Replace `server.js` with the reviewed `server.v83.js` contents (rename it to `server.js`), commit, redeploy. **Do not deploy both as competing entrypoints**.
+6. On Render, check status with the commands below. Do not run the installer on the live container as a deployment method; Render builds from GitHub.
 
+## Verification (Render Shell)
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v82/status" | python3 -m json.tool
+for endpoint in v81 v82 v83; do
+  echo "=== $endpoint ==="
+  curl -sS -i -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/$endpoint/status" | head -n 18
+done
 curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v82/audit" | python3 -m json.tool
 ```
+All status endpoints should return `Content-Type: application/json` and HTTP 200. The v82 audit can return 503 if its persistent journal is unhealthy; **do not override that check**.
 
-Dashboard `/v82` uses existing authentication. A 403 in the browser means it cannot supply the admin header; use the authenticated API via Render Shell instead.
-
-## Important limitations
-- v82 **supervises** the existing v81 paper engine, and does not modify its execution decisions. The v81 illustrative £1/pip/unit assumption remains uncertified.
-- The replay helper is deterministic and offline, not a historical backtest data fetcher or evidence of real broker fills. Sampled quotes can skip stop levels; it uses the first observed exit quote.
-- v82 does not fix the actual IG transaction date format; real record format/timezone must be independently established before certified net P&L.
-- `certified`, `brokerOrderAllowed`, and `unattendedOrderAllowed` remain false regardless of status. A later supervised, separately approved DEMO lifecycle test is required.
+## Scope and safety
+- No IG dealing callback, broker order submission, arming, or unattended IG execution.
+- v83 does not certify daily GBP P&L, GBP pip value, delayed-feed status, protective stops, or unknown-submit recovery. All remain blocked.
+- Existing legacy broker execution endpoints remain in your server: verify all their execution/auto-start environment flags are OFF; v83 does not disable or secure those older routes.
+- v83 dashboard is protected by existing `requireAdmin`; do not expose admin tokens in chat.
