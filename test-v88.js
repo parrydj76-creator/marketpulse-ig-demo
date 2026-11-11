@@ -1,0 +1,24 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV88,evaluateRisk,evaluateReconciliation}=require('./v88-broker-audit');
+const risk={epic:'CS.D.EURUSD.MINI.IP',side:'BUY',entry:1.1,stop:1.0988,dealSize:1,gbpPerPipPerDealSizeUnit:1,minimumDealSize:1,dealSizeIncrement:1,expectedFeesGBP:0,conversionAsOf:'2026-11-11T16:00:00Z'};
+assert.equal(evaluateRisk(risk).passed,true);
+assert.equal(evaluateRisk({...risk,stop:0}).passed,false);
+assert.equal(evaluateRisk({...risk,gbpPerPipPerDealSizeUnit:3}).passed,false);
+assert.equal(evaluateRisk({...risk,dealSize:0.5}).passed,false);
+const rec={asOf:'2026-11-11T16:00:00Z',epic:risk.epic,brokerPositions:[],localPositions:[],transactions:[{id:'tx1',at:'2026-11-11T15:00:00Z',realisedPnlGBP:10,feesGBP:1,financingGBP:0,otherChargesGBP:0}],openingBalanceGBP:100,closingBalanceGBP:109,netTransfersGBP:0,unrealisedPnlGBP:0};
+assert.equal(evaluateReconciliation(rec).passed,true);
+assert.equal(evaluateReconciliation({...rec,closingBalanceGBP:110}).passed,false);
+assert.equal(evaluateReconciliation({...rec,brokerPositions:[{dealId:'D1',epic:risk.epic,side:'BUY',size:1}]}).passed,false);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v88-'));
+const make=()=>createV88({requireAdmin:(_q,_r,n)=>n(),storageDir:dir,v86:{status:()=>({blockers:['feed']})},v87:{status:()=>({evidenceLedgerHealthy:true,paperPaused:true})}});
+const app={routes:{},get(p,...handlers){this.routes[p]=handlers.at(-1)},post(p,...handlers){this.routes[p]=handlers.at(-1)}};
+let a=make();a.routes(app);
+function response(){return {code:200,status(c){this.code=c;return this},set(){return this},json(x){this.data=x;return this}}}
+let r=response();app.routes['/api/v88/audit/risk']({is:()=>true,body:risk},r);assert.equal(r.data.recorded,true);assert.equal(r.data.brokerOrderAllowed,false);
+a=make();assert.equal(a.status().evidenceRecords,1);assert.equal(a.status().ledgerHealthy,true);
+r=response();app.routes['/api/v88/arm']({},r);assert.equal(r.code,409);
+fs.appendFileSync(path.join(dir,'v88-audit-ledger.jsonl'),'corruption\n');assert.equal(make().status().ledgerHealthy,false);
+fs.rmSync(dir,{recursive:true,force:true});
+console.log('v88 safety, risk, reconciliation, journal recovery and arm-block tests passed');

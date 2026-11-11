@@ -1232,6 +1232,10 @@ v86Readiness.routes(app);
 const v87Verification=require('./v87-verification').createV87({requireAdmin,storageDir:DATA_DIR,v68:v68Controller,v85:v85IntegrityController,v86:v86Readiness});
 v87Verification.routes(app);
 
+// V88: read-only broker risk and reconciliation audit; no IG dealing routes.
+const v88BrokerAudit=require('./v88-broker-audit').createV88({requireAdmin,storageDir:DATA_DIR,v86:v86Readiness,v87:v87Verification});
+v88BrokerAudit.routes(app);
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
