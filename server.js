@@ -1200,6 +1200,20 @@ const v81Simulator=require('./v81-simulator').createV81({
 v81Simulator.routes(app);v81Simulator.start();
 
 // Keep the catch-all after every versioned dashboard and API route.
+// V82 broker-write-free supervisor. Routes must precede catch-all.
+const v82Supervisor=require('./v82-readiness').createV82({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v81:v81Simulator
+});
+v82Supervisor.routes(app);v82Supervisor.start();
+
+// V83 read-only integration diagnostics. No IG dealing callback.
+const v83Readiness=require('./v83-readiness').createV83({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v81:v81Simulator,v82:v82Supervisor
+});
+v83Readiness.routes(app);
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
