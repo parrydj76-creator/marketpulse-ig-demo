@@ -1,0 +1,23 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV80,dateFormat,moneyFormat,ledgerStudy,assess}=require('./v80-autonomy');
+assert.equal(dateFormat('2026-11-11T14:00:00Z').timezoneVerified,true);
+assert.equal(dateFormat('2026-11-11T14:00:00').format,'ISO_LOCAL_NO_TIMEZONE');
+assert.equal(dateFormat('11/11/2026').timezoneVerified,false);
+assert.equal(moneyFormat('£-12.50').value,-12.5);
+assert.equal(moneyFormat('(£12.50)').value,-12.5);
+assert.equal(moneyFormat('12.50 DR').value,-12.5);
+assert.equal(moneyFormat('12.50 CR').value,12.5);
+assert.equal(moneyFormat('unknown').ok,false);
+const ledger=ledgerStudy([{reference:'a',date:'2026-11-11T14:00:00',profitAndLoss:'£2.00',currency:'£'}],new Date('2026-11-11T15:00:00Z'));
+assert.equal(ledger.invalidRows,1);assert.equal(ledger.netDailyPnlGBP,null);assert.equal(ledger.formats[0].dateFormat,'ISO_LOCAL_NO_TIMEZONE');
+const risk=assess({quote:null,signal:{direction:'WAIT'},positions:[],account:{currency:'GBP',accountType:'CFD'},market:{snapshot:{marketStatus:'TRADEABLE'}},ledger,persistent:true,journalHealthy:true,feed:{streamState:'CONNECTED'}});
+assert.equal(risk.brokerOrderAllowed,false);
+(async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v80-test-'));
+ const opts={requireAdmin:(_q,_r,next)=>next(),storageDir:dir,persistentStorage:true,v68:{status:()=>({streamState:'CONNECTED',quote:{bid:1.1,ask:1.1001,ageMs:5,spreadPips:1}})},v71:{status:()=>({signal:{direction:'WAIT',score:0,qualifiedBars:30}})},readPositions:async()=>[],readAccount:async()=>({currency:'GBP',accountType:'CFD'}),readMarket:async()=>({instrument:{epic:'CS.D.EURUSD.MINI.IP'},snapshot:{marketStatus:'TRADEABLE'}}),readTransactions:async()=>({transactions:[{date:'2026-11-11T14:00:00',profitAndLoss:'£2.00',currency:'£'}]})};
+ const v=createV80(opts),audit=await v.audit();assert.equal(audit.ledger.invalidRows,1);assert.equal(audit.brokerOrderAllowed,false);assert.equal(v.status().journalHealthy,true);
+ const restored=createV80(opts);assert.equal(restored.status().records,1);assert.equal(restored.status().journalHealthy,true);
+ fs.appendFileSync(path.join(dir,'v80-autonomy.jsonl'),'tamper\n');assert.equal(createV80(opts).status().journalHealthy,false);
+ fs.rmSync(dir,{recursive:true,force:true});console.log('V80 TESTS PASSED: parsing, fail-closed risk, audit, restart, corruption');
+})().catch(e=>{console.error(e);process.exitCode=1});
