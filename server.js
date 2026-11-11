@@ -1110,6 +1110,17 @@ const v70Shadow=require('./v70-shadow').createV70({
 v70Shadow.routes(app);
 v70Shadow.start();
 
+// V71: higher-frequency research sampling and broker read-only audits.
+// No broker-write callback is provided. All execution stays locked.
+const v71Engine=require('./v71-engine').createV71({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v70:v70Shadow,
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readAccount:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}}
+});
+v71Engine.routes(app);
+v71Engine.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV71,validateQuote}=require('./v71-engine');
+const now=Date.now(),q={epic:'CS.D.EURUSD.MINI.IP',source:'LIGHTSTREAMER',marketFlag:'DEAL         ',bid:1.12,ask:1.12006,spreadPips:0.6,receivedAt:new Date(now-100).toISOString(),igTimestamp:String(now-150),delay:null};
+assert.equal(validateQuote({streamState:'CONNECTED',quote:q},now).researchEligible,true);
+assert.equal(validateQuote({streamState:'CONNECTED',quote:q},now).executionEligible,false);
+assert.equal(validateQuote({streamState:'CONNECTED',quote:{...q,receivedAt:new Date(now-20000).toISOString()}},now).researchEligible,false);
+assert.equal(validateQuote({streamState:'CONNECTED',quote:{...q,ask:1.1}},now).researchEligible,false);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v71-'));
+const options={requireAdmin:(req,res,next)=>next(),storageDir:dir,persistentStorage:true,v68:{status:()=>({streamState:'CONNECTED',quote:q,journalHealthy:true,unresolvedBrokerIntents:[]})},v70:{status:()=>({journalHealthy:true})},readPositions:async()=>[],readAccount:async()=>({currency:'GBP'})};
+const a=createV71(options);assert.equal(a.status().brokerOrderAllowed,false);assert.equal(a.observe().observed,true);assert.equal(a.observe().observed,false);assert.equal(a.status().observations,1);assert.equal(a.signal().direction,'WAIT');
+const b=createV71(options);assert.equal(b.status().observations,1);assert.equal(b.status().journalHealthy,true);
+(async()=>{const x=await b.audit();assert.equal(x.unattendedOrderAllowed,false);assert(x.issues.includes('MINI_DELAY_UNVERIFIED'));const c=createV71(options);assert.equal(c.status().journalHealthy,true);const f=path.join(dir,'v71-observations.jsonl');fs.appendFileSync(f,'{"corrupt":true}\n');assert.equal(createV71(options).status().journalHealthy,false);console.log('v71 tests passed: validation, rejection, persistence, audit, tamper detection, broker lock')})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,50 +1,34 @@
-# MarketPulse AI v70 — Autonomous Observation and Broker-Safety Evidence
+# MarketPulse AI v71 — High-frequency research & unattended readiness
 
-This upgrade **does not place unattended IG DEMO orders**. It adds an automatic, durable, read-only research engine while the v69 certification matrix is unresolved. It is a substantial infrastructure step toward unattended DEMO dealing, not an execution unlock.
+## Scope
+This is a large **read-only** improvement towards unattended IG DEMO trading, **not** unattended broker execution. It reuses the existing v68 Lightstreamer Mini feed and v70 evidence collector. The new v71 sampler records qualifying observations every five seconds (instead of v70's one-minute cycle), builds research-only five-minute OHLC bars, and runs broker read-only reconciliation every minute. It does not subscribe to every individual Lightstreamer tick: its five-second observations are samples, not full tick-derived candles.
+
+- Padded `DEAL` market flags are normalized; stale quotes, invalid bid/ask, implausible IG timestamps and wide spreads are rejected.
+- Missing IG delay **does not prevent research-only observation**, but **never certifies the feed for execution**.
+- A five-minute candle must contain at least 12 samples spanning at least four minutes before it counts towards a 30-bar research warm-up.
+- EMA9/EMA21/RSI are research heuristics, not proven predictive models.
+- All samples and audit reports are appended to an fsynced SHA256 hash-chain journal. Restart reconstructs research history; corruption fails closed. This is local persistence integrity, **not** broker crash-recovery certification.
+- Broker position and GBP account reads are attempted each minute. No real order open/close test is performed.
+- GBP risk sizing, Mini delay, supervised lifecycle and broker crash recovery remain uncertified. Broker order callbacks are absent and the arming endpoint rejects requests.
 
 ## Installation
+1. Back up the existing GitHub repository and Render persistent DATA_DIR.
+2. Upload only `server.js` and `v71-engine.js` from this package into your current repository root. Keep all other existing v67–v70 modules, package.json, credentials and environment variables.
+3. **Do not enable** any broker write flags (`BROKER_DEMO_EXECUTION`, `V66_ENABLE_SUPERVISED_IG_DEMO`, etc.). `IG_ACCOUNT_TYPE` must remain `DEMO`.
+4. Commit and deploy to Render. Ensure DATA_DIR is on persistent disk, with a single writer/instance. Multiple instances sharing the journal are **not supported**.
+5. Expect the first research bar after five minutes, and 30 qualified consecutive bars after at least 150 minutes of healthy operation. Restarts can reconstruct existing completed bars.
 
-1. Back up the current deployed repository and **persistent DATA_DIR**.
-2. Upload `server.js` and new `v70-shadow.js` to the same repository root as your existing v68 and v69 modules. The ZIP includes matching copies of `v68-controller.js`, `v69-readiness.js`, `v67-autonomy.js` for reproducibility; only replace them if your deployed versions match these originals.
-3. Keep `IG_ACCOUNT_TYPE=DEMO`, `BROKER_DEMO_EXECUTION=false`, `V66_ENABLE_SUPERVISED_IG_DEMO=false`, and all other dealing write switches off. Keep `PERSISTENT_STORAGE_CONFIRMED=true` **only if DATA_DIR really is on durable Render disk**.
-4. Commit and redeploy on Render. This module does not require new dependencies.
-
-## Render Shell verification
-
+## Render Shell tests
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v70/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' "$BASE/api/v70/cycle" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v70/bars" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/quote-diagnostics" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v71/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v71/observe" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v71/audit" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v71/candles" | python3 -m json.tool
 ```
 
-## What is new
+## Important limitations
+The existing v70 engine remains active; v71 runs independently. Running both increases disk writes and memory usage. v71 loads its journal into memory on startup and is not yet suitable for unlimited long-term tick retention; rotate/archive only with an integrity-preserving procedure. `journalHealthy` does not independently prove Render persistent disk is configured. The research signal does not execute paper or broker trades, and risk limits are not independently certified against IG transactions. Never interpret an API 200 as authorization to deal.
 
-- Automatic 60-second read-only cycle with account, EUR/USD Mini market-contract, and broker-position reconciliation.
-- Durable, hash-chained, fsynced append-only observations and cycle results; startup checks reject truncation/tampering.
-- Samples live Mini quotes even while `DELAY` is missing, but **only as explicitly uncertified research data**. No broker or simulated orders are placed from this data.
-- Reconstructs five-minute research candles from persisted samples after restarts; reports progress toward 30 consecutive sufficiently sampled bars.
-- Independent read-only EMA/RSI heuristic, with no claimed predictive accuracy or order eligibility.
-- Exposes broker safety blockers and fixed read-only execution state.
-- No order-submit, close, modify, approve, arm or broker-write callback is provided to v70.
-
-## Unresolved safety gates
-
-- IG stream `DELAY` field is absent. A plausible timestamp alone does not certify an undelayed feed.
-- IG Mini per-size GBP/pip and currency conversion are not independently certified.
-- Supervised DEMO open -> protective stop -> verified close has not been executed.
-- Broker-side ambiguous-submission recovery has not been verified; journal integrity is not equivalent to broker crash recovery.
-- Broker daily realised/unrealised P&L and total trades/day across all strategies are not independently reconciled. The read-only module therefore never authorises orders.
-- The new research engine does not backtest or place paper trades. The 30-bar heuristic is a diagnostic, not a profit guarantee.
-- The journal is append-only and can grow; plan retention and backups before extended operation. Multi-instance disk coordination is not certified.
-
-## Local tests
-
-```bash
-node --check server.js
-node --check v70-shadow.js
-node test-v70.js
-```
-
-Tests use stubbed broker reads; they **do not** connect to IG or certify any broker lifecycle. Next engineering milestone: inspect IG streaming field definitions and account entitlements, independent GBP sizing evidence, then supervised DEMO open-stop-close and fault-injection verification with explicit operator approval.
+## Local verification
+`node --check server.js && node --check v71-engine.js && node test-v71.js`
