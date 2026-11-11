@@ -1,38 +1,24 @@
-# MarketPulse AI v88 — Read-only Broker Audit Mega Upgrade
+# MarketPulse AI v89–v91 Combined Mega Upgrade
 
-## Safety
-- IG DEMO dealing remains **hard-blocked**. No trading or broker write endpoints are added.
-- Does **not** certify IG contract size, feed delay, broker accounting or readiness for unattended demo execution.
-- All supplied values are **operator-supplied and unverified**. The v88 calculations are diagnostics, not independent broker evidence.
-- Preserves the existing v81/v85/v87 ledgers; adds a separate `v88-audit-ledger.jsonl` hash chain in DATA_DIR.
-- Records only computed audit diagnostics; not raw statements or credentials. Do not submit account IDs or secrets.
+This package builds on v88 and adds **v89 authenticated IG GET-only observation**, **v90 contract/account/position diagnostics**, and **v91 immutable evidence and recovery readiness**. No IG dealing requests are added.
 
-## Deploy
-1. Back up current GitHub source and Render persistent DATA_DIR.
-2. Upload all included runtime `.js` files to the same directory as your existing server.js, overwriting matching names. Other existing files must remain in place.
-3. Commit and deploy. Keep `BROKER_DEMO_EXECUTION=false`, `AUTO_START=false`, v85 pause active.
-4. Run `node test-v88.js` in a safe environment; test does not connect to IG.
-5. Verify `/api/v88/status` using the existing `X-Admin-Token` header.
+## Install
+1. Back up GitHub files and the Render persistent DATA_DIR.
+2. Upload the runtime JavaScript files at repository root, replacing matching names; retain all other existing project files.
+3. Keep `BROKER_DEMO_EXECUTION=false` and `AUTO_START=false`.
+4. Deploy. Check `GET /api/v91/status` with `X-Admin-Token`.
+5. Capture with `POST /api/v91/capture` with `X-Admin-Token`; this makes three authenticated **GET** requests to IG DEMO: `/markets/CS.D.EURUSD.MINI.IP`, `/positions`, `/accounts`. Do not include credentials in requests.
+6. Inspect `GET /api/v91/recovery`.
 
-## Endpoints
-- `GET /api/v88/status`: ledger health, readiness blockers, safety flags.
-- `POST /api/v88/audit/risk`: hypothetical contract-risk calculation. Requires `epic`, `side`, `entry`, `stop`, `dealSize`, `gbpPerPipPerDealSizeUnit`, `minimumDealSize`, `dealSizeIncrement`, `expectedFeesGBP`, `conversionAsOf` (UTC ISO). Numeric inputs must be JSON numbers. The result always has `contractCertified:false`.
-- `POST /api/v88/audit/reconciliation`: manually supplied *redacted* broker/local positions, transactions, opening/closing balances and transfers. Transactions require `id`, `at`, `realisedPnlGBP`, `feesGBP`, `financingGBP`, `otherChargesGBP`. Position records require `dealId`, `epic`, `side`, `size`. Result always has `brokerDataCertified:false`.
-- `POST /api/v88/arm`: always HTTP 409, hard blocked.
+## Limits
+- This is not unattended trading. No automatic arming, broker write or dealing endpoints were added.
+- The IG account reader uses existing session auth; the existing IG app may still use its legacy endpoints and polling independently.
+- Market dealing rules are displayed as observations only. GBP/pip, conversion, units, charges and stop rules are **not certified**.
+- Transactions are **not fetched** in this release because IG history requires correct paging and date-range handling; daily broker P&L remains unverified.
+- The observation ledger persists sanitized results; no account identifiers, tokens or raw broker payloads are saved.
+- The local `busy` guard does not provide a distributed lock. No crash-safe unknown-submission recovery is certified.
+- Capture is disabled unless v86 reports the paper simulator paused.
+- No changes are made to the 205-record v81 journal or previous evidence ledgers.
 
-## Important limitations
-- No automatic IG API import or read-only IG API integration in this release.
-- GBP/pip value is **not inferred** from IG market price; it must be verified against the broker contract and FX conversion.
-- Balance reconciliation assumes the provided transactions cover the same interval as the balances. It cannot prove a complete UK trading day.
-- Fees, financing, conversions, transaction dates and balance definitions vary by broker; supplied fields require independent checking.
-- Local file lock and journal hash chains alone do not certify distributed single-writer or crash-safe broker submission recovery.
-- Never turn on broker execution based on a green v88 calculation.
-
-## Quick verification
-```
-BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v88/status" | python3 -m json.tool
-```
-
-## Files
-`server.js`, `v81-simulator.js`, `v85-integrity.js`, `v86-readiness.js`, `v87-verification.js`, `v88-broker-audit.js`, existing tests and `test-v88.js`.
+## Tests
+Run `node test-v91.js`, `node test-v88.js`, `node test-v87.js`, `node test-v86.js` in a Node environment. These tests use mocked data.
