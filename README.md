@@ -1,41 +1,50 @@
-# MarketPulse AI v69 — Streaming Reliability and Unattended-Readiness Upgrade
+# MarketPulse AI v70 — Autonomous Observation and Broker-Safety Evidence
 
-## Scope
-Incremental upgrade to your existing v68 IG DEMO app. **Read-only**. This release materially improves the quote-validation defect found in your Render output and adds a separate diagnostic/certification-readiness API. It **does not** place broker orders, certify GBP pip value, or unlock unattended trading.
+This upgrade **does not place unattended IG DEMO orders**. It adds an automatic, durable, read-only research engine while the v69 certification matrix is unresolved. It is a substantial infrastructure step toward unattended DEMO dealing, not an execution unlock.
 
-## Included
-- `server.js`: v68 server with a registered v69 readiness observer, preserving older endpoints and broker-write locks.
-- `v68-controller.js`: fixes `DLG_FLAG` padding handling both when receiving stream events and checking quote status. It **continues to reject missing `DELAY`**; no fallback to zero or guessed quote certification.
-- `v69-readiness.js`: checks quote receipt age, IG 13-digit timestamp plausibility, normalized market flag, spread, delay, journal, cycle and risk blockers. Separates plausible timestamp from *certified* exchange timestamp. Adds a read-only certification matrix.
-- `v67-autonomy.js`: included as a compatibility copy from v68.
-- `test-v68.js`, `test-v69.js`: local mocked regression tests.
+## Installation
 
-## Install
-1. Back up your GitHub project and persistent Render data first.
-2. Upload `server.js`, `v68-controller.js`, and `v69-readiness.js` to the root of the existing repository. Do not delete other modules.
-3. Commit and redeploy. Keep `BROKER_DEMO_EXECUTION=false`, `V66_ENABLE_SUPERVISED_IG_DEMO=false`, and any existing broker safety controls unchanged.
-4. Ensure `DATA_DIR` uses your configured persistent disk. This patch cannot make an ephemeral filesystem persistent.
+1. Back up the current deployed repository and **persistent DATA_DIR**.
+2. Upload `server.js` and new `v70-shadow.js` to the same repository root as your existing v68 and v69 modules. The ZIP includes matching copies of `v68-controller.js`, `v69-readiness.js`, `v67-autonomy.js` for reproducibility; only replace them if your deployed versions match these originals.
+3. Keep `IG_ACCOUNT_TYPE=DEMO`, `BROKER_DEMO_EXECUTION=false`, `V66_ENABLE_SUPERVISED_IG_DEMO=false`, and all other dealing write switches off. Keep `PERSISTENT_STORAGE_CONFIRMED=true` **only if DATA_DIR really is on durable Render disk**.
+4. Commit and redeploy on Render. This module does not require new dependencies.
 
-## Render Shell checks
+## Render Shell verification
+
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/status" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v70/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' "$BASE/api/v70/cycle" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v70/bars" | python3 -m json.tool
 curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/quote-diagnostics" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/certification-matrix" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v68/status" | python3 -m json.tool
 ```
 
-## Current blockers
-Your real v68 stream had `marketFlag: "DEAL         "` and `delay: null`. This patch fixes the first, not the second. The Mini quote cannot be considered independently undelayed until the IG stream's field schema or another authoritative source confirms delay. The 13-digit timestamp appears plausible but is **not** proven to be an exchange-origin timestamp. v68's 5-minute bar builder still only accepts quotes with explicit `DELAY=0`; it may remain at zero bars.
+## What is new
 
-GBP monetary exposure, an explicitly approved real IG DEMO open/stop/close lifecycle, and recovery from an actual uncertain broker submission remain **uncertified**. The automated cycle is a read-only observation loop, not an unattended trading engine. Risk limits are displayed and checked for the local paper ledger but are not yet independently reconciled with all broker P&L and fills.
+- Automatic 60-second read-only cycle with account, EUR/USD Mini market-contract, and broker-position reconciliation.
+- Durable, hash-chained, fsynced append-only observations and cycle results; startup checks reject truncation/tampering.
+- Samples live Mini quotes even while `DELAY` is missing, but **only as explicitly uncertified research data**. No broker or simulated orders are placed from this data.
+- Reconstructs five-minute research candles from persisted samples after restarts; reports progress toward 30 consecutive sufficiently sampled bars.
+- Independent read-only EMA/RSI heuristic, with no claimed predictive accuracy or order eligibility.
+- Exposes broker safety blockers and fixed read-only execution state.
+- No order-submit, close, modify, approve, arm or broker-write callback is provided to v70.
 
-## Test locally
+## Unresolved safety gates
+
+- IG stream `DELAY` field is absent. A plausible timestamp alone does not certify an undelayed feed.
+- IG Mini per-size GBP/pip and currency conversion are not independently certified.
+- Supervised DEMO open -> protective stop -> verified close has not been executed.
+- Broker-side ambiguous-submission recovery has not been verified; journal integrity is not equivalent to broker crash recovery.
+- Broker daily realised/unrealised P&L and total trades/day across all strategies are not independently reconciled. The read-only module therefore never authorises orders.
+- The new research engine does not backtest or place paper trades. The 30-bar heuristic is a diagnostic, not a profit guarantee.
+- The journal is append-only and can grow; plan retention and backups before extended operation. Multi-instance disk coordination is not certified.
+
+## Local tests
+
 ```bash
 node --check server.js
-node --check v68-controller.js
-node --check v69-readiness.js
-node test-v68.js
-node test-v69.js
+node --check v70-shadow.js
+node test-v70.js
 ```
-Tests mock broker access and do not validate live IG behaviour.
+
+Tests use stubbed broker reads; they **do not** connect to IG or certify any broker lifecycle. Next engineering milestone: inspect IG streaming field definitions and account entitlements, independent GBP sizing evidence, then supervised DEMO open-stop-close and fault-injection verification with explicit operator approval.

@@ -1099,6 +1099,17 @@ if(v68StreamTimer.unref)v68StreamTimer.unref();
 const v69Readiness=require('./v69-readiness').createV69({v68:v68Controller,requireAdmin});
 v69Readiness.routes(app);
 
+// v70: autonomous research/evidence engine. Only read callbacks; no IG order submission capability.
+const v70Shadow=require('./v70-shadow').createV70({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ legacyBlocked:()=>!BROKER_DEMO_EXECUTION,v68:v68Controller,v69:v69Readiness,
+ readBroker:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP')),
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions}
+});
+v70Shadow.routes(app);
+v70Shadow.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
