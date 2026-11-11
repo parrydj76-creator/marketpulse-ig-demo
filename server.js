@@ -1095,6 +1095,10 @@ const v68StreamTimer=setInterval(()=>{if(auth&&v68Controller.status().streamStat
 }},30000);
 if(v68StreamTimer.unref)v68StreamTimer.unref();
 
+// v69 independent safety-readiness observer: no broker-write capabilities.
+const v69Readiness=require('./v69-readiness').createV69({v68:v68Controller,requireAdmin});
+v69Readiness.routes(app);
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

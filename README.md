@@ -1,49 +1,41 @@
-# MarketPulse AI v68 — Direct Mini Stream + Scheduled Read-Only Controller
+# MarketPulse AI v69 — Streaming Reliability and Unattended-Readiness Upgrade
 
-## Installation
-This is an **incremental upgrade** based on the v67 `server.js` and `v67-autonomy.js` files previously supplied. Back up the current GitHub repository and persistent DATA_DIR first.
+## Scope
+Incremental upgrade to your existing v68 IG DEMO app. **Read-only**. This release materially improves the quote-validation defect found in your Render output and adds a separate diagnostic/certification-readiness API. It **does not** place broker orders, certify GBP pip value, or unlock unattended trading.
 
-Upload **server.js**, **v68-controller.js** to the repository root. The included **v67-autonomy.js** is a reference copy; do not overwrite a newer existing version unnecessarily. Preserve all other modules, including v66-dealing.js. Redeploy Render. Requires existing `lightstreamer-client-node` dependency and `IG_ACCOUNT_TYPE=DEMO`.
+## Included
+- `server.js`: v68 server with a registered v69 readiness observer, preserving older endpoints and broker-write locks.
+- `v68-controller.js`: fixes `DLG_FLAG` padding handling both when receiving stream events and checking quote status. It **continues to reject missing `DELAY`**; no fallback to zero or guessed quote certification.
+- `v69-readiness.js`: checks quote receipt age, IG 13-digit timestamp plausibility, normalized market flag, spread, delay, journal, cycle and risk blockers. Separates plausible timestamp from *certified* exchange timestamp. Adds a read-only certification matrix.
+- `v67-autonomy.js`: included as a compatibility copy from v68.
+- `test-v68.js`, `test-v69.js`: local mocked regression tests.
 
-**Do not enable V66_ENABLE_SUPERVISED_IG_DEMO or other broker write flags.** The existing legacy broker gate and v66 preflight remain locked.
+## Install
+1. Back up your GitHub project and persistent Render data first.
+2. Upload `server.js`, `v68-controller.js`, and `v69-readiness.js` to the root of the existing repository. Do not delete other modules.
+3. Commit and redeploy. Keep `BROKER_DEMO_EXECUTION=false`, `V66_ENABLE_SUPERVISED_IG_DEMO=false`, and any existing broker safety controls unchanged.
+4. Ensure `DATA_DIR` uses your configured persistent disk. This patch cannot make an ephemeral filesystem persistent.
 
-## Features
-- Dedicated `PRICE:<account>:CS.D.EURUSD.MINI.IP` Lightstreamer subscription with bid/ask, DLG_FLAG, DELAY, and TIMESTAMP fields
-- Strict 15-second *local receipt* freshness, non-delayed DEAL flag, and <=2.5-pip spread validation
-- No claim that a clock-only IG timestamp proves exchange-side freshness
-- 5-minute streamed sample bars and EMA9/EMA21/RSI heuristic, requiring 30 consecutive bars
-- Scheduled 60-second read-only evaluation (no broker order writes), broker position check and daily limits
-- Hash-linked, fsynced JSONL journal with restart integrity check and reconstructed paper ledger
-- Read-only IG contract and GBP account evidence endpoint; **GBP pip sizing remains uncertified**
-- Read-only IG broker position/stop inspection; **no real order open/close has been executed or certified**
-- Optional isolated simulated unknown-intent restart drill; durable fail-closed unknown state
-- Emergency halt, no unattended arm path
-
-## Render Shell
+## Render Shell checks
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/status" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/quote-diagnostics" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v69/certification-matrix" | python3 -m json.tool
 curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v68/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' "$BASE/api/v68/cycle" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' "$BASE/api/v68/sizing-evidence" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' "$BASE/api/v68/lifecycle-evidence" | python3 -m json.tool
 ```
 
-After startup, allow ~30 seconds for the Mini stream connection attempt, and 150+ minutes of genuine sampled 5-minute bars for a fully warmed-up signal. Do not expect a trade from this build.
+## Current blockers
+Your real v68 stream had `marketFlag: "DEAL         "` and `delay: null`. This patch fixes the first, not the second. The Mini quote cannot be considered independently undelayed until the IG stream's field schema or another authoritative source confirms delay. The 13-digit timestamp appears plausible but is **not** proven to be an exchange-origin timestamp. v68's 5-minute bar builder still only accepts quotes with explicit `DELAY=0`; it may remain at zero bars.
 
-## Important limitations
-1. **No independent GBP pip certification:** `valueOfOnePip`, deal-size mapping and USD/GBP conversion remain unresolved. No asserted FX input can enable execution.
-2. **No broker open/close test performed:** A real IG DEMO supervised order requires a separate explicit operator approval and independently verified risk controls. The v66 execution preflight still blocks it.
-3. **No end-to-end broker crash certification:** The restart drill proves only the local journal's unknown-intent persistence and fail-closed handling. It does not test broker order submissions.
-4. **No autonomous broker orders or paper entries:** The scheduled controller observes market signals and risk, but refuses to open a simulated position without certified GBP risk. Paper close accounting is included for future controlled simulation state.
-5. **Timestamp caution:** The subscription TIMESTAMP can be clock-only; 15-second receipt freshness is not equivalent to independently verified market-origin freshness.
-6. **Persistent storage is mandatory** for journal health; if DATA_DIR is ephemeral, state can be lost on Render restart.
-7. **Emergency halt persists** and has no reset endpoint. The optional drill injects an intentionally unresolved fake intent with no automatic clear path. Run it only on a disposable test instance with `V68_ENABLE_CRASH_DRILL=true`.
-8. An IG session reconnect may require POST `/api/v68/stream-reconnect` to refresh the Mini stream.
+GBP monetary exposure, an explicitly approved real IG DEMO open/stop/close lifecycle, and recovery from an actual uncertain broker submission remain **uncertified**. The automated cycle is a read-only observation loop, not an unattended trading engine. Risk limits are displayed and checked for the local paper ledger but are not yet independently reconciled with all broker P&L and fills.
 
-## Local syntax and unit tests
+## Test locally
 ```bash
 node --check server.js
 node --check v68-controller.js
+node --check v69-readiness.js
 node test-v68.js
+node test-v69.js
 ```
-Tests use a stubbed Lightstreamer module and do not connect to IG or place broker orders.
+Tests mock broker access and do not validate live IG behaviour.

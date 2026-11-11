@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {evaluateQuote,readiness}=require('./v69-readiness');
+const now=Date.parse('2026-11-11T08:03:50Z');
+const q={epic:'CS.D.EURUSD.MINI.IP',source:'LIGHTSTREAMER',bid:1.11531,ask:1.11540,spreadPips:0.9,receivedAt:new Date(now-200).toISOString(),marketFlag:'DEAL         ',delay:null,igTimestamp:String(now-300)};
+let a=evaluateQuote(q,now);
+assert.equal(a.flag,'DEAL');assert(a.failures.includes('STREAM_DELAY_FIELD_ABSENT'));assert(!a.failures.includes('MARKET_NOT_DEAL'));assert.equal(a.passesObservableChecks,false);
+a=evaluateQuote({...q,delay:'0'},now);assert.equal(a.passesObservableChecks,true);assert.equal(a.exchangeOriginCertified,false);
+a=evaluateQuote({...q,delay:'5'},now);assert(a.failures.includes('STREAM_DELAY_NOT_ZERO'));
+a=evaluateQuote({...q,delay:'0',igTimestamp:String(now-30000)},now);assert(a.failures.includes('IG_TIMESTAMP_NOT_PLAUSIBLE'));
+a=evaluateQuote({...q,delay:'0',receivedAt:new Date(now-30000).toISOString()},now);assert(a.failures.includes('RECEIPT_AGE_INVALID'));
+a=evaluateQuote({...q,delay:'0',marketFlag:'CLOSED'},now);assert(a.failures.includes('MARKET_NOT_DEAL'));
+const v68={status:()=>({quote:q,streamState:'CONNECTED',journalHealthy:true,journalRecords:12,cycleScheduled:true,gbpSizingCertified:false,brokerLifecycleCertified:false,crashRecoveryCertified:false,unresolvedBrokerIntents:[],paper:{realizedTodayGBP:0,tradesToday:0},limits:{},signal:{direction:'WAIT'}})};
+const r=readiness(v68);assert.equal(r.brokerOrderAllowed,false);assert.equal(r.unattendedOrderAllowed,false);assert(r.blockers.includes('GBP_RISK_UNCERTIFIED'));assert(r.blockers.includes('STREAM_DELAY_FIELD_ABSENT'));
+console.log('PASS v69: normalized DEAL, absent/nonzero delay, timestamp, age, safety locks, readiness');
