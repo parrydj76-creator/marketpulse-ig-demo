@@ -1,37 +1,46 @@
-# MarketPulse AI v72 — Read-only Broker Certification Workbench
+# MarketPulse AI v73 — broker evidence and recovery workbench
 
-## Scope
-A substantial, additive, **broker-write-free** upgrade on v71. It provides a durable certification journal, automatic one-minute independent readback audits of broker positions, account currency and Mini market identity, quote diagnostics, research-readiness reporting, and an illustrative risk-sizing scenario calculator. It does **not** independently certify pip value, feed delay, broker order lifecycle, DEMO account environment, or crash recovery. No new IG order write path exists. `/api/v72/arm-unattended` rejects with HTTP 409.
+**Read-only IG integration. No broker order submission, no automatic dealing, no supervised live order submission.** This is a development milestone, not an execution certification.
 
-## Install
-1. Back up your GitHub repository, Render environment variables and persistent disk data.
-2. Upload **server.js** and **v72-certification.js** to the repository root (beside existing v68–v71 modules). Do not remove existing modules or change environment variables.
-3. Optionally upload `test-v72.js` for local tests (`node test-v72.js`).
-4. Redeploy on Render. Ensure `DATA_DIR` is on an actual persistent disk and `PERSISTENT_STORAGE_CONFIRMED=true` only when independently confirmed. A healthy journal alone does not prove durable hosting.
-5. Test in Render Shell (admin token must already be available):
+## Installation
+
+Back up your existing repository and persistent journal directory. Upload `server.js` and `v73-recovery.js` to the root of your existing GitHub repository. Retain all earlier v67–v72 modules, `public/`, package files and Render environment configuration. Keep all legacy execution switches disabled. Redeploy on Render.
+
+## Features
+
+- Read-only audit of IG account currency, position count, EUR/USD Mini metadata and transaction endpoint availability.
+- Captures instrument contract/dealing-rule fields for independent review. These fields **do not establish GBP pip value or permissible trade size** by themselves.
+- Append-only, fsync-backed, hash-linked v73 evidence journal, startup integrity verification and fail-closed behaviour on journal errors.
+- Durable **simulated** order-intent ledger with UUID identifiers, restart reconstruction, duplicate-intent prevention and explicit simulated resolution.
+- Scheduled read-only audit every 60 seconds.
+- Hard-blocked unattended arming route and no broker-write callbacks.
+
+## Test on Render Shell
 
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v72/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v72/audit" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v72/evidence" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v73/status" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v73/audit" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v73/recovery" | python3 -m json.tool
 ```
 
-## Illustrative sizing scenario (NOT a certified contract value)
-Only supply a GBP/pip/contract value after independently establishing the IG Mini contract denomination and currency conversion. This endpoint **never certifies or places orders**.
+Optional **local dry-run only**, with zero IG order submission:
 
 ```bash
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{"riskGBP":25,"stopPips":12,"gbpPerPipPerContract":1,"minDealSize":0.1,"dealSizeIncrement":0.1}' "$BASE/api/v72/sizing-scenario" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{"direction":"BUY","confirm":"DRY_RUN_NO_BROKER_ORDER"}' "$BASE/api/v73/dry-run-intent" | python3 -m json.tool
 ```
 
-The example GBP/pip and deal-size parameters are **hypothetical**, not verified IG market specifications. The stop-only formula excludes slippage, gaps, spread, fees, guaranteed-stop premiums and currency conversion changes. Never use its result to submit an order.
+The dry-run creates an unresolved simulated intent, which must be resolved explicitly with `POST /api/v73/resolve-dry-run`, JSON `{"id":"<returned uuid>","confirm":"RESOLVE_DRY_RUN_ONLY"}`. Do not confuse simulated resolution with broker reconciliation.
 
-## Certification still required
-- IG DEMO environment verification; independently established GBP pip value and minimum/increment deal size
-- Confirmed non-delayed Mini market data
-- Operator-approved broker DEMO open/stop/close lifecycle with actual broker readback
-- Broker unknown-submit, idempotency, restart and crash recovery verification
-- Real broker realized/unrealized daily GBP P&L and trade count reconciliation
-- Explicit safe architecture review of any existing legacy broker-write routes and environment flags
+## Important limitations
 
-**Important:** v72's new endpoints are read-only, but the existing application may contain older broker-write routes controlled by separate environment flags. Do not infer that installing v72 disables those legacy routes. Keep existing broker execution environment switches OFF and review them before further changes.
+- IG `/history/transactions/ALL` may require endpoint-specific API headers/parameters and may fail or return a different schema. This is captured as a diagnostic failure, **not** a reason to guess daily P&L.
+- Historical transaction rows alone are not certified daily realised/unrealised P&L.
+- Five-second observations are sampled research quotes, not exchange-certified tick data.
+- No real IG unknown-submit recovery, broker deal lifecycle, independent GBP pip value, delay verification or demo environment proof is completed by this upgrade.
+- The v73 journal must reside on a genuinely durable Render disk to survive redeploys; a healthy file write alone is not proof of durability.
+- The legacy `server.js` broker write guard is hard-coded false in this package. Do not change it.
+
+## Local validation
+
+`node --check server.js && node --check v73-recovery.js && node test-v73.js`

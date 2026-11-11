@@ -1133,6 +1133,20 @@ const v72Certification=require('./v72-certification').createV72({
 v72Certification.routes(app);
 v72Certification.start();
 
+// V73: independent read-only recovery and broker evidence workbench.
+// No order submission callback exists; this cannot arm unattended dealing.
+const v73Recovery=require('./v73-recovery').createV73({
+ requireAdmin,storageDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ v68:v68Controller,v71:v71Engine,v72:v72Certification,
+ readPositions:async()=>{const p=await api('/positions','GET',null,'2');if(!Array.isArray(p.positions))throw Error('INVALID_POSITIONS');return p.positions},
+ readAccount:async()=>{const a=await api('/accounts');const ac=a.accounts?.find(x=>x.accountId===auth?.accountId);if(!ac)throw Error('ACCOUNT_MISMATCH');return {currency:ac.currency,accountType:ac.accountType}},
+ readMarket:()=>api('/markets/'+encodeURIComponent('CS.D.EURUSD.MINI.IP'),'GET'),
+ // IG transaction history is queried for read-only diagnostics; its response is NOT yet certified as a daily P&L ledger.
+ readTransactions:()=>api('/history/transactions/ALL','GET',null,'2')
+});
+v73Recovery.routes(app);
+v73Recovery.start();
+
 // Keep the catch-all after every versioned dashboard and API route.
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
