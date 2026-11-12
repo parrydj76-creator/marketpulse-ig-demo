@@ -1,25 +1,29 @@
-# MarketPulse AI v96 — IG history repair and diagnostics
+# MarketPulse AI v97–v100 combined — READ ONLY
 
-## Install
-Back up your GitHub repository and persistent Render `DATA_DIR`. Upload the **runtime** `.js` files from this ZIP to the same root directory as your existing `server.js`, replacing matching filenames. Retain all other existing project files (including `v54-safety.js` and dependencies). Commit and redeploy. No installer or renaming required.
+Built on the supplied v96 ZIP. Upload all runtime JS files (server.js, v81-simulator.js, v85-integrity.js, v86-readiness.js, v87-verification.js, v88-broker-audit.js, v91-combined.js, v95-combined.js, v96-diagnostics.js, v100-combined.js) to your existing GitHub project. Back up repository and Render persistent disk before deployment. Do not upload tests as runtime dependencies. No rename or installer.
 
-**This is a repair release, not unattended trading.** `BROKER_DEMO_EXECUTION=false`, `AUTO_START=false`, and the paper safety hold remain enforced. No broker write calls were added.
+## Contents
+- v97: v100 status reads v95's latest in-process evidence, rather than an independently stale history result.
+- v98: transaction classification and strict numeric diagnostic calculations (NOT net daily P&L certification).
+- v99: conservative hypothetical GBP risk and position discrepancy helpers; no assumed pip value or size.
+- v100: simulated UNKNOWN submit fail-closed policy, append-only hash-linked diagnostics, restart integrity checks.
 
-## Fixed
-- IG `/history/transactions` version 2 now uses the documented query string (`type`, `from`, `to`, `pageSize`, `pageNumber`) rather than the unsupported version-1-style URL.
-- Pagination checks `metadata.pageData.pageNumber`, `totalPages`, and `pageSize`; fetches all pages up to a 10-page cap, then explicitly marks larger results incomplete.
-- Malformed responses, missing metadata, API errors, invalid dates and incomplete history fail closed.
-- The `/api/v96/status` endpoint distinguishes transient feed connectivity and quote validity from independent execution certification.
-- All historical journals are preserved. Previous bad paper trades remain quarantined; v95 historical evidence is not edited.
+## Safety
+No IG dealing endpoints, no automatic arming, no broker order writes. Historical paper journal is untouched. IG demo execution must remain disabled: `BROKER_DEMO_EXECUTION=false`, `AUTO_START=false`. Existing legacy server trading paths were retained; verify all execution flags are off before deployment. This release does NOT resolve exchange timestamp/delay, GBP pip value, broker net daily P&L, protective stop lifecycle, unknown submit broker recovery, or distributed lock certification. No new certificate is granted.
 
-## Render Shell
-```bash
-BASE="http://127.0.0.1:${PORT:-10000}"
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v96/status" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{"from":"2026-11-11","to":"2026-11-11"}' "$BASE/api/v95/capture" | python3 -m json.tool
+## Render verification
 ```
+BASE="http://127.0.0.1:${PORT:-10000}"
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v100/status" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v100/diagnostics" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v100/evidence/capture" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v100/recovery" | python3 -m json.tool
+```
+The evidence capture is local diagnostic only. v95 read-only capture still handles IG requests. Do not expose ADMIN_TOKEN in chat.
 
-## Unresolved and deliberately blocked
-History pagination completion **does not** certify net P&L, currency conversion, charges, account-level reconciliation, exchange timestamps, GBP/pip sizing, protective stops, uncertain submissions, or distributed locking. The legacy three false paper trades remain quarantined. An IG transaction-history response with no transactions does not prove that no broker charges occurred. Read-only requests may fail due to IG credentials, API entitlements, date formats, or network conditions; report actual errors before any additional change.
-
-Run `node test-v95.js && node test-v96.js`. Other included tests are from the previous package.
+## Limitations
+- v100 diagnostics do not fetch raw transaction rows, and cannot reconcile fees or net daily broker P&L. `accounting([])` is deliberately a placeholder diagnostic, not an account result.
+- `reconcile` is a count-level alarm only, not deal-ID reconciliation.
+- Unknown-submit recovery is a simulated policy, not certified IG lifecycle behavior.
+- Multi-instance lock is not certified.
+- v95 date range and pagination behavior are unchanged from v96.

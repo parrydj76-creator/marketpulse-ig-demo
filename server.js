@@ -1248,6 +1248,10 @@ v95Combined.routes(app);
 const v96Diagnostics=require('./v96-diagnostics').createV96({requireAdmin,v86:v86Readiness,v95:v95Combined});
 v96Diagnostics.routes(app);
 
+// v97-v100: diagnostics only; no broker writes or unattended arming.
+const v100Combined=require('./v100-combined').createV100({requireAdmin,storageDir:DATA_DIR,v86:v86Readiness,v95:v95Combined,v91:v91Combined});
+v100Combined.routes(app);
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

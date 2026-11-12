@@ -1,0 +1,18 @@
+'use strict';
+const assert=require('node:assert/strict');const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createV100,accounting,risk,reconcile,recoverySimulation}=require('./v100-combined');
+assert.equal(accounting([{profitAndLoss:3},{profitAndLoss:-2}]).observedNumericPnlTotal,1);
+assert.equal(accounting([{profitAndLoss:'£3'}]).valid,false);
+assert.equal(risk({gbpPerPip:1,stopPips:12,targetRiskGBP:25,minSize:0.1,sizeStep:0.1,proposedSize:0.2}).withinBudget,true);
+assert.equal(risk({gbpPerPip:20,stopPips:12,targetRiskGBP:25,minSize:0.1,sizeStep:0.1,proposedSize:0.2}).withinBudget,false);
+assert.equal(risk({}).certified,false);assert.equal(reconcile([{}]).unexpectedExposure,true);
+assert.equal(recoverySimulation().resubmitUnknown,false);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v100-'));
+const dependencies={requireAdmin:(q,r,n)=>n(),storageDir:dir,v86:{status:()=>({paperPaused:true,blockers:['TEST']})},v95:{status:()=>({ledgerHealthy:true,lastEvidence:{checks:{history:{ok:true,historyComplete:true,transactionsObserved:0,pagesFetched:1}}}})},v91:{status:()=>({ledgerHealthy:true})}};
+const one=createV100(dependencies);assert.equal(one.status().brokerOrderAllowed,false);assert.equal(one.status().lastHistoryCapture.ok,true);
+const handlers={};one.routes({get:(p,_m,f)=>handlers[p]=f,post:(p,_m,f)=>handlers[p]=f});
+const response=()=>({set(){return this},json(x){this.body=x;return this},status(){return this}});
+const r=response();handlers['/api/v100/evidence/capture']({},r);assert.equal(r.body.recorded,true);
+const two=createV100(dependencies);assert.equal(two.status().v100Records,1);assert.equal(two.status().v100LedgerHealthy,true);
+fs.appendFileSync(path.join(dir,'v100-diagnostics.jsonl'),'bad\n');assert.equal(createV100(dependencies).status().v100LedgerHealthy,false);
+console.log('v100 tests passed');
