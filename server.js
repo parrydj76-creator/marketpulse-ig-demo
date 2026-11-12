@@ -1260,6 +1260,17 @@ v105Combined.routes(app);
 const v110Combined=require('./v110-combined').createV110({requireAdmin,storageDir:DATA_DIR,v86:v86Readiness,v95:v95Combined,v105:v105Combined});
 v110Combined.routes(app);
 
+// v111-v115: read-only certification workbench; optional PostgreSQL lease test.
+// PostgreSQL is optional. No database means no lease, never execution permission.
+let v115Pool=null;
+if(process.env.V115_DATABASE_URL){
+ try {const {Pool}=require('pg');v115Pool=new Pool({connectionString:process.env.V115_DATABASE_URL,max:2,ssl:process.env.V115_PG_SSL==='true'?{rejectUnauthorized:true}:undefined});}
+ catch(e){console.error('v115 PostgreSQL unavailable; lease disabled:',e.message);}
+}
+const v115Combined=require('./v115-combined').createV115({requireAdmin,storageDir:DATA_DIR,v86:v86Readiness,v95:v95Combined,v110:v110Combined,pool:v115Pool});
+v115Combined.routes(app);
+
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
