@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV150,riskPreview,parseContract,chainCheck,POLICY}=require('./v150-readiness');
+const fakeV125={diagnostics:()=>({database:{initialized:true},snapshot:{fresh:true},polling:{running:true}})};
+const fakeV140={report:()=>({outstanding:['BROKER_STOP_LIFECYCLE']})};
+const c=createV150({requireAdmin:(_q,_r,n)=>n(),v125:fakeV125,v140:fakeV140,readMarket:async epic=>({instrument:{epic},dealingRules:{minDealSize:{value:0.1,unit:'POINTS'}}})});
+assert.equal(c.tests().passed,true);
+assert.equal(c.tests().count,13);
+assert.equal(c.status().brokerOrderAllowed,false);
+assert.equal(c.status().readyForUnattendedDemo,false);
+assert.equal(POLICY.maxTradesPerDay,3);
+assert.equal(riskPreview({}).certified,false);
+assert.equal(parseContract({instrument:{epic:'CS.D.EURUSD.CFD.IP'}},POLICY.epic).issues.includes('BROKER_EPIC_MISMATCH'),true);
+c.compare().then(x=>{assert.equal(x.contracts.length,2);assert.equal(x.certified,false);console.log('v150: 13/13 fault tests passed; no broker writes');}).catch(e=>{console.error(e);process.exitCode=1});

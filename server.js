@@ -1287,6 +1287,13 @@ void v125Combined.initialize().then(()=>v125Combined.start()).catch(e=>console.e
 const v140Mega=require('./v140-mega').createV140({requireAdmin,v125:v125Combined,pool:v125Pool});
 v140Mega.routes(app);
 
+// V150 isolated read-only IG contract comparison and PostgreSQL rehearsal verification.
+const v150Readiness=require('./v150-readiness').createV150({
+ requireAdmin,pool:v125Pool,v125:v125Combined,v140:v140Mega,
+ readMarket:epic=>api('/markets/'+encodeURIComponent(epic),'GET',null,'3')
+});
+v150Readiness.routes(app);
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
