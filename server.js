@@ -1299,6 +1299,10 @@ const v160Readiness=require('./v160-execution-readiness').createV160({requireAdm
 v160Readiness.routes(app);
 const v170Certification=require('./v170-certification').createV170({requireAdmin,v160:v160Readiness,v150:v150Readiness,v125:v125Combined});
 v170Certification.routes(app);
+// v180 evidence workbench: PostgreSQL evidence intake and integrity; NO IG dealing.
+const v180Evidence=require('./v180-evidence-workbench').createV180({requireAdmin,pool:v125Pool,v170:v170Certification});
+v180Evidence.routes(app);
+void v180Evidence.init().catch(e=>console.error('v180 evidence schema init failed:',e.message));
 void v160Readiness.init().catch(e=>console.error('v160 rehearsal lease init failed:',e.message));
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));

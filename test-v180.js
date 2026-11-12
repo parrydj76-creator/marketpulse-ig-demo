@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV180,reviewEvidence,stable,sha}=require('./v180-evidence-workbench');
+const {TARGET}=require('./v150-readiness');
+const stub={status:()=>({policy:{},certification:{}})};
+const v=createV180({requireAdmin:(req,res,next)=>next(),v170:stub});
+assert.equal(v.tests().passed,true);
+assert.equal(v.tests().count,8);
+assert.equal(v.status().readyForUnattendedDemo,false);
+assert.equal(v.status().brokerOrderAllowed,false);
+assert.equal(sha(stable({b:2,a:1})),sha(stable({a:1,b:2})));
+const review=reviewEvidence({category:'brokerStopLifecycle',epic:TARGET,source:'OPERATOR_TEST',sourceRef:'demo-order-test-123',observedAt:new Date().toISOString(),payload:{epic:TARGET}});
+assert.equal(review.valid,true);
+assert.equal(review.completeCandidate,false);
+assert.equal(review.independentlyCertified,false);
+console.log('v180 tests PASS 8/8');
