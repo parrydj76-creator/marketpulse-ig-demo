@@ -9,23 +9,33 @@ const digest=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('he
 const safe=e=>String(e?.message||e||'ERROR').replace(/[^a-zA-Z0-9_ .:-]/g,'_').slice(0,120);
 const numeric=x=>typeof x==='number'&&Number.isFinite(x);
 const dayUK=(d=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
-function datePart(s){if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(s)||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)throw Error('INVALID_DATE');return s;}
+function datePart(s){if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(s)||(!Number.isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s))throw Error('INVALID_DATE');return s;}
+// IG REST GET /history/transactions VERSION 2 uses query parameters.
+// The similarly named path endpoint is VERSION 1 and uses different date formatting.
 function transactionPath(from,to,page,size){
  datePart(from);datePart(to);
  if(from>to||!Number.isInteger(page)||page<1||page>10||!Number.isInteger(size)||size<1||size>100)throw Error('INVALID_HISTORY_REQUEST');
- // IG REST API v2 transaction history endpoint; compatibility must be checked against the connected account.
- return `/history/transactions/ALL/${from}/${to}/pageSize/${size}/pageNumber/${page}`;
+ const qs=new URLSearchParams({type:'ALL',from,to,pageSize:String(size),pageNumber:String(page)});
+ return '/history/transactions?'+qs.toString();
 }
 function analyseHistory(pages,from,to){
- const counts=pages.map(p=>Array.isArray(p?.transactions)?p.transactions.length:-1);
- const malformed=counts.some(n=>n<0);
- const rows=pages.flatMap(p=>Array.isArray(p?.transactions)?p.transactions:[]);
- const continuation=pages.length>0&&counts[counts.length-1]===100;
- const amounts=rows.map(r=>r?.profitAndLoss);
- const numericPnl=amounts.every(n=>numeric(n));
+ const rows=[];let malformed=false,metadataValid=true,expectedPages=null,consistent=true;
+ for(let idx=0;idx<pages.length;idx++){
+  const p=pages[idx];if(!Array.isArray(p?.transactions)){malformed=true;continue;}
+  rows.push(...p.transactions);
+  const d=p?.metadata?.pageData;
+  if(!d||!Number.isInteger(d.totalPages)||d.totalPages<0||!Number.isInteger(d.pageNumber)||d.pageNumber!==idx+1||!Number.isInteger(d.pageSize)||d.pageSize<1){metadataValid=false;continue;}
+  if(expectedPages===null)expectedPages=d.totalPages;
+  else if(expectedPages!==d.totalPages)consistent=false;
+ }
+ const complete=pages.length>0&&!malformed&&metadataValid&&consistent&&expectedPages!==null&&pages.length===Math.max(1,expectedPages);
+ const truncated=pages.length>0&&(!complete||expectedPages>pages.length);
  return {from,to,pagesFetched:pages.length,transactionsObserved:rows.length,responseShapeValid:!malformed,
-  historyComplete:false,historyPossiblyTruncated:continuation,allPnlNumeric:numericPnl,
-  netDailyPnlCertified:false,chargesCertified:false,reason:'History pages are observations only: timezone, pagination metadata, transaction classification, charges and opening balance must be independently reconciled'};
+  paginationMetadataValid:metadataValid&&consistent&&pages.length>0,reportedTotalPages:expectedPages,
+  historyComplete:complete,historyPossiblyTruncated:truncated,
+  allPnlNumeric:rows.every(r=>typeof r?.profitAndLoss==='number'&&Number.isFinite(r.profitAndLoss)),
+  netDailyPnlCertified:false,chargesCertified:false,
+  reason:'Complete pagination is not broker P&L certification: classify transactions, parse currency amounts, reconcile charges, timezone and opening balance'};
 }
 function analyseRisk(market,positions){
  const i=market?.instrument||{},r=market?.dealingRules||{},p=positions?.positions;
@@ -63,15 +73,22 @@ function createV95({requireAdmin,storageDir,readIG,v86,v91}){
    }
    checks.contractRisk=market&&positions?analyseRisk(market,positions):{gbpRiskCertified:false,reason:'Market or positions unavailable'};
    if(includeHistory){
-    const pages=[];let historyError=null;const size=100;
+    const pages=[];let historyError=null;const size=100;let expectedPages=null;
     for(let page=1;page<=10;page++){
-     try{const raw=await readIG(transactionPath(from,to,page,size),'2');if(!Array.isArray(raw?.transactions))throw Error('INVALID_TRANSACTIONS_RESPONSE');pages.push(raw);
-      // Stop only on short page; full final page remains ambiguous at max page cap.
-      if(raw.transactions.length<size)break;
+     try{
+      const raw=await readIG(transactionPath(from,to,page,size),'2');
+      if(!Array.isArray(raw?.transactions))throw Error('INVALID_TRANSACTIONS_RESPONSE');
+      const pd=raw?.metadata?.pageData;
+      if(!pd||!Number.isInteger(pd.totalPages)||pd.totalPages<0||!Number.isInteger(pd.pageNumber)||pd.pageNumber!==page||!Number.isInteger(pd.pageSize)||pd.pageSize<1)throw Error('INVALID_HISTORY_PAGINATION_METADATA');
+      if(expectedPages===null)expectedPages=pd.totalPages;
+      if(expectedPages!==pd.totalPages)throw Error('INCONSISTENT_HISTORY_PAGINATION');
+      pages.push(raw);
+      if(page>=Math.max(1,expectedPages))break;
      }catch(e){historyError=safe(e);break;}
     }
     checks.history={ok:!historyError,error:historyError,...analyseHistory(pages,from,to)};
-    if(pages.length===10&&pages[9]?.transactions?.length===100)checks.history.historyPossiblyTruncated=true;
+    if(historyError)checks.history.historyComplete=false;
+    if(expectedPages>10){checks.history.historyComplete=false;checks.history.historyPossiblyTruncated=true;checks.history.error='HISTORY_PAGE_LIMIT_REACHED';checks.history.ok=false;}
    }else checks.history={ok:false,error:'HISTORY_CAPTURE_NOT_REQUESTED'};
    const payload={at:new Date().toISOString(),checks,brokerOrderAllowed:false,certified:false};
    const evidenceHash=append(payload);return {recorded:true,evidenceHash,records,checks,brokerOrderAllowed:false,certified:false};
