@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV170}=require('./v170-certification');
+const v160={status:()=>({database:{configured:true},independentContractCertification:false,executionLockIntegrated:false})};
+const v150={status:()=>({snapshot:{fresh:true},polling:{enabled:true}})};
+const v170=createV170({requireAdmin:()=>{},v160,v150,v125:{}});
+assert.equal(v170.tests().passed,true);
+assert.equal(v170.tests().count,7);
+assert.equal(v170.status().certificationsPassed,0);
+assert.equal(v170.status().brokerOrderAllowed,false);
+assert.equal(Object.keys(v170.status().certification).length,7);
+console.log('v170 safety checks: PASS (7/7)');

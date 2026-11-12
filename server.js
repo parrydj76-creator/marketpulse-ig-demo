@@ -1297,6 +1297,8 @@ v150Readiness.routes(app);
 // V160 isolated rehearsal leases, operator evidence review and lifecycle simulation. No broker writes.
 const v160Readiness=require('./v160-execution-readiness').createV160({requireAdmin,pool:v125Pool,v125:v125Combined,v150:v150Readiness});
 v160Readiness.routes(app);
+const v170Certification=require('./v170-certification').createV170({requireAdmin,v160:v160Readiness,v150:v150Readiness,v125:v125Combined});
+v170Certification.routes(app);
 void v160Readiness.init().catch(e=>console.error('v160 rehearsal lease init failed:',e.message));
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
