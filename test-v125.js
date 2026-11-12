@@ -1,0 +1,12 @@
+ 'use strict';
+const assert=require('node:assert/strict');const v=require('./v125-combined');
+assert.equal(v.faultTests().passed,true);assert.equal(v.faultTests().count,14);
+assert.equal(v.freshness(null).fresh,false);
+assert.equal(v.evaluate({}).brokerOrderAllowed,false);
+assert.equal(v.STATES.includes('SUBMITTING'),false);
+const st=v.createRehearsalStore(null);assert.equal(st.configured,false);
+(async()=>{await assert.rejects(st.create({fingerprint:'a'.repeat(64),evidenceHash:'b'.repeat(64)}),/DATABASE_NOT_CONFIGURED/);
+const b={status:()=>({paperPaused:true,paperSchedulerRunning:false})},p={status:()=>({ledgerHealthy:true,lastEvidence:null})},z={status:()=>({ledgerHealthy:true}),refresh:async()=>({refresh:{recorded:true,marketOk:true,positionsOk:true,accountsOk:true,historyComplete:true}})};
+const c=v.createV125({requireAdmin:()=>{},v86:b,v95:p,v115:z});assert.equal(c.diagnostics().readyForUnattendedDemo,false);assert.equal(c.start(),false);
+const r=await c.refresh();assert.equal(r.refresh.ok,true);assert.equal(r.brokerOrderAllowed,false);
+console.log('v125: 14 fault tests, read-only refresh and disabled execution passed');})().catch(e=>{console.error(e);process.exitCode=1});

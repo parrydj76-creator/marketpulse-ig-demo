@@ -1271,6 +1271,18 @@ const v115Combined=require('./v115-combined').createV115({requireAdmin,storageDi
 v115Combined.routes(app);
 
 
+// v116-v125: read-only refresh scheduler + durable PostgreSQL rehearsal intents.
+// No IG dealing calls or permission to arm. Polling disabled by default.
+let v125Pool=null;
+if(process.env.V125_DATABASE_URL){
+ try {const {Pool}=require('pg');v125Pool=new Pool({connectionString:process.env.V125_DATABASE_URL,max:3,ssl:process.env.V125_PG_SSL==='true'?{rejectUnauthorized:true}:undefined});}
+ catch(e){console.error('v125 database unavailable:',e.message);}
+}
+const v125Combined=require('./v125-combined').createV125({requireAdmin,v86:v86Readiness,v95:v95Combined,v115:v115Combined,pool:v125Pool,
+ refreshIntervalMs:Number(process.env.V125_READONLY_POLL_MS||0)});
+v125Combined.routes(app);
+void v125Combined.initialize().then(()=>v125Combined.start()).catch(e=>console.error('v125 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
