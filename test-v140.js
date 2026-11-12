@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV140,riskCandidate,pnlCandidate}=require('./v140-mega');
+const v125={diagnostics:()=>({snapshot:{fresh:false},polling:{enabled:false,running:false},database:{initialized:false},issues:['PAPER_NOT_PAUSED'],remainingCertifications:['GBP_PIP_VALUE_AND_DEAL_SIZE']}),store:{create(){}}};
+const m=createV140({requireAdmin:(_q,_r,n)=>n(),v125});
+assert.equal(m.tests().passed,true,JSON.stringify(m.tests()));
+assert.equal(m.report().brokerOrderAllowed,false);
+assert.equal(riskCandidate({}).certified,false);
+assert.equal(pnlCandidate({}).certified,false);
+console.log('v140 PASS',m.tests().count,'fail-closed checks');
