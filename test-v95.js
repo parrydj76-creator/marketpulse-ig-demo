@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
+const {createV95,transactionPath,analyseHistory,analyseRisk}=require('./v95-combined');
+(async()=>{
+ assert.equal(transactionPath('2026-11-11','2026-11-11',1,100),'/history/transactions/ALL/2026-11-11/2026-11-11/pageSize/100/pageNumber/1');
+ assert.throws(()=>transactionPath('2026-11-12','2026-11-11',1,100));
+ assert.equal(analyseHistory([{transactions:[]}],'2026-11-11','2026-11-11').netDailyPnlCertified,false);
+ assert.equal(analyseRisk({instrument:{epic:'CS.D.EURUSD.MINI.IP'},dealingRules:{}},{positions:[]}).gbpRiskCertified,false);
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v95-test-'));
+ const calls=[];const readIG=async(url,version)=>{calls.push([url,version]);if(url.startsWith('/history/'))return {transactions:[]};if(url.startsWith('/markets/'))return {instrument:{epic:'CS.D.EURUSD.MINI.IP'},dealingRules:{minDealSize:{value:0.1,unit:'POINTS'}}};if(url==='/positions')return {positions:[]};if(url==='/accounts')return {accounts:[{currency:'GBP',accountId:'DO_NOT_STORE'}]};throw Error('UNEXPECTED_ENDPOINT');};
+ const args={requireAdmin:(_q,_r,n)=>n(),storageDir:dir,readIG,v86:{status:()=>({paperPaused:true,blockers:['gbpPipValueAndDealSizeCertified']})},v91:{status:()=>({ledgerHealthy:true})}};
+ const engine=createV95(args);const first=await engine.capture({from:'2026-11-11',to:'2026-11-11'});
+ assert.equal(first.recorded,true);assert.equal(first.checks.history.ok,true);assert.equal(first.checks.history.netDailyPnlCertified,false);
+ assert.equal(first.checks.contractRisk.gbpRiskCertified,false);assert.equal(engine.status().brokerOrderAllowed,false);
+ assert.equal(fs.readFileSync(path.join(dir,'v95-broker-evidence.jsonl'),'utf8').includes('DO_NOT_STORE'),false);
+ const restart=createV95(args);assert.equal(restart.status().ledgerHealthy,true);assert.equal(restart.status().evidenceRecords,1);
+ const paused=createV95({...args,v86:{status:()=>({paperPaused:false})}});await assert.rejects(()=>paused.capture(),/PAPER_NOT_PAUSED/);
+ const corrupt=path.join(dir,'v95-broker-evidence.jsonl');fs.appendFileSync(corrupt,'{"bad":true}\n');assert.equal(createV95(args).status().ledgerHealthy,false);
+ assert.equal(calls.some(([url])=>!url.startsWith('/history/')&&!['/positions','/accounts'].includes(url)&&!url.startsWith('/markets/')),false);
+ fs.rmSync(dir,{recursive:true,force:true});console.log('v95 read-only, fail-closed, privacy, persistence and corruption tests PASS');
+})().catch(e=>{console.error(e);process.exitCode=1;});
