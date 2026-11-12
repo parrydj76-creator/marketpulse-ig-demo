@@ -1294,6 +1294,11 @@ const v150Readiness=require('./v150-readiness').createV150({
 });
 v150Readiness.routes(app);
 
+// V160 isolated rehearsal leases, operator evidence review and lifecycle simulation. No broker writes.
+const v160Readiness=require('./v160-execution-readiness').createV160({requireAdmin,pool:v125Pool,v125:v125Combined,v150:v150Readiness});
+v160Readiness.routes(app);
+void v160Readiness.init().catch(e=>console.error('v160 rehearsal lease init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

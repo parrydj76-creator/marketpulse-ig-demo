@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV160,evaluateEvidence,lifecycleScenario}=require('./v160-execution-readiness');
+const c=createV160({requireAdmin:(_q,_r,n)=>n(),v125:{},v150:{status:()=>({snapshot:{fresh:true},polling:{running:true}})}});
+assert.equal(c.tests().passed,true);
+assert.equal(c.tests().count,12);
+assert.equal(c.status().brokerOrderAllowed,false);
+assert.equal(evaluateEvidence({}).certified,false);
+assert.equal(lifecycleScenario({}).brokerOrderAttempted,false);
+console.log('v160: 12/12 fail-closed tests passed; DB rehearsal requires live PostgreSQL');
