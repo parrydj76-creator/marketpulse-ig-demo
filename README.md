@@ -1,3 +1,3 @@
-# MarketPulse AI v228–v234
+# MarketPulse AI v241
 
-See README-v234.md. GitHub-flat project. Broker execution disabled.
+Start with `README-v241.md`. Flat GitHub upload structure; broker writes remain disabled.
