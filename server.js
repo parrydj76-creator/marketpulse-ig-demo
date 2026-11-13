@@ -1380,6 +1380,12 @@ const v227Certification=require('./v227-execution-certification').createV227({re
 v227Certification.routes(app);
 void v227Certification.init().catch(e=>console.error('v227 init failed:',e.message));
 
+// v228-v234: GET-only broker evidence pipeline; no broker write adapter.
+const v234Evidence=require('./v234-broker-evidence-pipeline').createV234({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version),v227:v227Certification});
+v234Evidence.routes(app);
+void v234Evidence.init().catch(e=>console.error('v234 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

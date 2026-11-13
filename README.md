@@ -1,7 +1,3 @@
-# MarketPulse AI v205–v208 combined upgrade
+# MarketPulse AI v228–v234
 
-See `README-v208.md` for installation, Render Shell tests, evidence checks, limitations and broker safety restrictions. Existing earlier README files are retained.
-
-
-## Latest v227 release
-See [README-v227.md](README-v227.md) for deployment and safety tests.
+See README-v234.md. GitHub-flat project. Broker execution disabled.
