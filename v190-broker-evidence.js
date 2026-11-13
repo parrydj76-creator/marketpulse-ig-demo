@@ -30,16 +30,37 @@ function createV190({requireAdmin,pool,readIG}={}){
  let initialized=false,busy=false;
  async function init(){await pool.query(DDL);initialized=true;}
  async function ensure(){if(!initialized)await init();}
+ // v191: read-only, independently diagnosed GET calls; transaction failures never masquerade as complete history.
+ const safeError=e=>{const m=String(e?.message||e||'ERROR');const status=m.match(/\b(400|401|403|404|408|409|429|500|502|503|504)\b/);return {code:status?status[1]:'UPSTREAM_FAILURE'};};
+ function historyPath(){
+  const now=new Date();const to=now.toISOString().slice(0,10);
+  const from=new Date(now.getTime()-86400000).toISOString().slice(0,10);
+  return '/history/transactions?'+new URLSearchParams({type:'ALL',from,to,pageSize:'100',pageNumber:'1'}).toString();
+ }
  async function collect(){await ensure();if(busy)throw Error('COLLECTOR_BUSY');busy=true;
   try{
-   // Strict GET-only allowlist, authenticated by the existing IG DEMO client.
-   const [market,positions,accounts,transactions]=await Promise.all([
-    readIG('/markets/'+encodeURIComponent(EPIC),'3'),readIG('/positions','2'),readIG('/accounts','1'),readIG('/history/transactions/ALL','2')]);
-   if(!market?.instrument||!Array.isArray(positions?.positions)||!Array.isArray(accounts?.accounts)||!Array.isArray(transactions?.transactions))throw Error('IG_RESPONSE_INCOMPLETE');
-   const observation={epic:EPIC,observedAt:new Date().toISOString(),market:{instrument:{epic:market.instrument.epic,currencies:market.instrument.currencies,lotSize:market.instrument.lotSize,contractSize:market.instrument.contractSize},dealingRules:market.dealingRules,snapshot:{marketStatus:market.snapshot?.marketStatus,updateTime:market.snapshot?.updateTime,delayTime:market.snapshot?.delayTime,bid:market.snapshot?.bid,offer:market.snapshot?.offer}},positions:positions.positions.filter(p=>p.market?.epic===EPIC).map(p=>({market:{epic:p.market?.epic},position:{dealId:p.position?.dealId,direction:p.position?.direction,size:p.position?.size,stopLevel:p.position?.stopLevel,createdDate:p.position?.createdDate}})),accountCurrencies:accounts.accounts.map(a=>a.currency),accounts:accounts.accounts.map(redactAccount),transactionCount:transactions.transactions.length,transactions:transactions.transactions.slice(0,200).map(t=>({date:t.date,dateUtc:t.dateUtc,transactionType:t.transactionType,profitAndLoss:t.profitAndLoss,cashTransaction:t.cashTransaction,openLevel:t.openLevel,closeLevel:t.closeLevel,instrumentName:t.instrumentName,currency:t.currency})),historyTruncated:transactions.transactions.length>200};
+   const endpoints=[['market','/markets/'+encodeURIComponent(EPIC),'3'],['positions','/positions','2'],['accounts','/accounts','1'],['transactions',historyPath(),'2']];
+   const settled=await Promise.allSettled(endpoints.map(([,route,version])=>readIG(route,version)));
+   const data={},checks={};
+   settled.forEach((r,i)=>{const name=endpoints[i][0];if(r.status==='fulfilled'){data[name]=r.value;checks[name]={ok:true};}else{checks[name]={ok:false,...safeError(r.reason)};}});
+   const market=data.market,positions=data.positions,accounts=data.accounts,transactions=data.transactions;
+   if(checks.market.ok&&(!market?.instrument||market.instrument.epic!==EPIC)){checks.market={ok:false,code:'MARKET_SCHEMA_OR_EPIC'};}
+   if(checks.positions.ok&&!Array.isArray(positions?.positions)){checks.positions={ok:false,code:'POSITIONS_SCHEMA'};}
+   if(checks.accounts.ok&&!Array.isArray(accounts?.accounts)){checks.accounts={ok:false,code:'ACCOUNTS_SCHEMA'};}
+   if(checks.transactions.ok&&!Array.isArray(transactions?.transactions)){checks.transactions={ok:false,code:'TRANSACTIONS_SCHEMA'};}
+   const coreComplete=checks.market.ok&&checks.positions.ok&&checks.accounts.ok;
+   const historyAvailable=checks.transactions.ok;
+   if(!Object.values(checks).some(x=>x.ok))return {collected:false,reason:'ALL_IG_READS_FAILED',checks,brokerOrderAllowed:false};
+   const rows=historyAvailable?transactions.transactions:[];
+   const observation={epic:EPIC,observedAt:new Date().toISOString(),checks,coreComplete,historyAvailable,historyComplete:false,historyReason:historyAvailable?'FIRST_PAGE_ONLY_NOT_RECONCILED':'HISTORY_UNAVAILABLE',
+    market:checks.market.ok?{instrument:{epic:market.instrument.epic,currencies:market.instrument.currencies,lotSize:market.instrument.lotSize,contractSize:market.instrument.contractSize,valueOfOnePip:market.instrument.valueOfOnePip,onePipMeans:market.instrument.onePipMeans},dealingRules:market.dealingRules,snapshot:{marketStatus:market.snapshot?.marketStatus,updateTime:market.snapshot?.updateTime,delayTime:market.snapshot?.delayTime,bid:market.snapshot?.bid,offer:market.snapshot?.offer}}:null,
+    positions:checks.positions.ok?positions.positions.filter(p=>p.market?.epic===EPIC).map(p=>({market:{epic:p.market?.epic},position:{dealId:p.position?.dealId,direction:p.position?.direction,size:p.position?.size,stopLevel:p.position?.stopLevel,createdDate:p.position?.createdDate}})):null,
+    accountCurrencies:checks.accounts.ok?accounts.accounts.map(a=>a.currency):null,accounts:checks.accounts.ok?accounts.accounts.map(redactAccount):null,
+    transactionCount:historyAvailable?rows.length:null,transactions:historyAvailable?rows.slice(0,100).map(t=>({date:t.date,dateUtc:t.dateUtc,transactionType:t.transactionType,profitAndLoss:t.profitAndLoss,cashTransaction:t.cashTransaction,openLevel:t.openLevel,closeLevel:t.closeLevel,instrumentName:t.instrumentName,currency:t.currency})):null,
+    historyTruncated:historyAvailable?(rows.length>=100):null};
    const id=crypto.randomUUID(),digest=hash(observation);
    await pool.query('INSERT INTO mp_v190_observations(id,observed_at,epic,payload,digest) VALUES($1,$2,$3,$4::jsonb,$5)',[id,observation.observedAt,EPIC,JSON.stringify(observation),digest]);
-   return {collected:true,id,observedAt:observation.observedAt,digest,positionCount:observation.positions.length,transactionCount:observation.transactionCount,historyTruncated:observation.historyTruncated,exchangeDelayCertified:false,gbpRiskCertified:false,accountingCertified:false,brokerOrderAllowed:false};
+   return {collected:true,partial:!coreComplete||!historyAvailable,id,observedAt:observation.observedAt,digest,checks,coreComplete,historyAvailable,historyComplete:false,positionCount:observation.positions?.length??null,transactionCount:observation.transactionCount,historyTruncated:observation.historyTruncated,exchangeDelayCertified:false,gbpRiskCertified:false,accountingCertified:false,brokerOrderAllowed:false};
   }finally{busy=false;}
  }
  async function list(){await ensure();const r=await pool.query('SELECT id,created_at,observed_at,digest FROM mp_v190_observations ORDER BY created_at DESC LIMIT 30');return {records:r.rows,brokerOrderAllowed:false};}
@@ -55,9 +76,9 @@ function createV190({requireAdmin,pool,readIG}={}){
    await c.query("INSERT INTO mp_v190_intents(id,epic,state,fingerprint,details,fence) VALUES($1,$2,'PREPARED',$3,$4::jsonb,$5)",[id,EPIC,fingerprint,JSON.stringify({direction:x.direction,risk,operatorNonce:x.operatorNonce||null}),seq.rows[0].n]);await c.query('COMMIT');return {prepared:true,id,fence:String(seq.rows[0].n),state:'PREPARED',submissionIntegrated:false,brokerOrderAllowed:false};
   }catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
  async function cancel(id){await ensure();if(!/^[a-f0-9-]{36}$/i.test(id))throw Error('INVALID_ID');const r=await pool.query("UPDATE mp_v190_intents SET state='CANCELLED' WHERE id=$1 AND state='PREPARED' RETURNING id",[id]);return {cancelled:r.rowCount===1,brokerOrderAllowed:false};}
- function status(){return {version:'190.0.0',mode:'READ_ONLY_FAIL_CLOSED',epic:EPIC,databaseInitialized:initialized,features:['IG_DEMO_GET_ONLY_CAPTURE','POSTGRES_OBSERVATION_STORAGE','OBSERVATION_HASH_VERIFICATION','RISK_CANDIDATE','FENCED_PREPARATION_ONLY'],brokerWriteIntegration:false,brokerStopLifecycleCertified:false,unknownSubmissionRecoveryCertified:false,certificationsPassed:0,certificationsRequired:7,brokerOrderAllowed:false,readyForUnattendedDemo:false};}
+ function status(){return {version:'191.0.0',mode:'READ_ONLY_FAIL_CLOSED',epic:EPIC,databaseInitialized:initialized,features:['IG_DEMO_GET_ONLY_CAPTURE','POSTGRES_OBSERVATION_STORAGE','OBSERVATION_HASH_VERIFICATION','RISK_CANDIDATE','FENCED_PREPARATION_ONLY','V191_HISTORY_V2_QUERY','V191_PARTIAL_OBSERVATIONS','V191_ENDPOINT_DIAGNOSTICS'],brokerWriteIntegration:false,brokerStopLifecycleCertified:false,unknownSubmissionRecoveryCertified:false,certificationsPassed:0,certificationsRequired:7,brokerOrderAllowed:false,readyForUnattendedDemo:false};}
  const wrap=f=>async(req,res)=>{try{res.set('Cache-Control','no-store').json(await f(req));}catch(e){res.status(409).json({error:String(e.message).slice(0,160),brokerOrderAllowed:false});}};
- function routes(app){app.get('/api/v190/status',requireAdmin,wrap(status));app.post('/api/v190/collect',requireAdmin,wrap(collect));app.get('/api/v190/observations',requireAdmin,wrap(list));app.get('/api/v190/observations/verify/:id',requireAdmin,wrap(req=>verify(req.params.id)));app.post('/api/v190/risk/preview',requireAdmin,wrap(req=>riskPreview(req.body)));app.post('/api/v190/intent/prepare',requireAdmin,wrap(req=>prepare(req.body)));app.post('/api/v190/intent/cancel/:id',requireAdmin,wrap(req=>cancel(req.params.id)));app.post('/api/v190/order/submit',requireAdmin,(_req,res)=>res.status(409).json({error:'BROKER_ORDER_HARD_BLOCKED_UNCERTIFIED',brokerOrderAllowed:false}));}
+ function routes(app){app.get('/api/v191/status',requireAdmin,wrap(status));app.post('/api/v191/collect',requireAdmin,wrap(collect));app.get('/api/v191/observations',requireAdmin,wrap(list));app.get('/api/v191/observations/verify/:id',requireAdmin,wrap(req=>verify(req.params.id)));app.post('/api/v191/order/submit',requireAdmin,(_req,res)=>res.status(409).json({error:'BROKER_ORDER_HARD_BLOCKED_UNCERTIFIED',brokerOrderAllowed:false}));app.get('/api/v190/status',requireAdmin,wrap(status));app.post('/api/v190/collect',requireAdmin,wrap(collect));app.get('/api/v190/observations',requireAdmin,wrap(list));app.get('/api/v190/observations/verify/:id',requireAdmin,wrap(req=>verify(req.params.id)));app.post('/api/v190/risk/preview',requireAdmin,wrap(req=>riskPreview(req.body)));app.post('/api/v190/intent/prepare',requireAdmin,wrap(req=>prepare(req.body)));app.post('/api/v190/intent/cancel/:id',requireAdmin,wrap(req=>cancel(req.params.id)));app.post('/api/v190/order/submit',requireAdmin,(_req,res)=>res.status(409).json({error:'BROKER_ORDER_HARD_BLOCKED_UNCERTIFIED',brokerOrderAllowed:false}));}
  return {init,routes,status,collect,verify,prepare,cancel};
 }
 module.exports={createV190,riskPreview,EPIC};
