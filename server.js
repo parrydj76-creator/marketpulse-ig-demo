@@ -1392,6 +1392,12 @@ const v241Dossier=require('./v241-supervised-execution-dossier').createV241({req
 v241Dossier.routes(app);
 void v241Dossier.init().catch(e=>console.error('v241 init failed:',e.message));
 
+// v242-v250 foundation: broker reads and durable fail-closed intents; no write adapter.
+const v250Foundation=require('./v242-execution-foundation').createV242({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version)});
+v250Foundation.routes(app);
+void v250Foundation.init().catch(e=>console.error('v250 foundation init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
