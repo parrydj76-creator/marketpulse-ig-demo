@@ -1,0 +1,18 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createV194,STATES,NEXT,EPIC}=require('./v194-execution-lab');
+assert.equal(EPIC,'CS.D.EURUSD.MINI.IP');
+assert.equal(STATES.length,8);
+assert.deepEqual(NEXT.PREPARED,['CANCELLED','SUBMITTING']);
+assert.deepEqual(NEXT.UNKNOWN,['CONFIRMED']);
+assert.deepEqual(NEXT.RECONCILED,[]);
+const v=createV194({pool:{query:async()=>({rows:[]})},requireAdmin:()=>{},readIG:async()=>{throw Error('MOCK_BROKER_DISABLED')}});
+assert.equal(v.status().brokerOrderAllowed,false);
+assert.equal(v.status().brokerWriteIntegration,false);
+assert.equal(v.status().readyForUnattendedDemo,false);
+assert.equal(v.status().certificationsPassed,0);
+const handlers={};v.routes({get:(p,...a)=>handlers[p]=a.at(-1),post:(p,...a)=>handlers[p]=a.at(-1)});
+assert.equal(typeof handlers['/api/v194/order/submit'],'function');
+let code,body;handlers['/api/v194/order/submit']({}, {status:n=>{code=n;return {json:x=>body=x}}});
+assert.equal(code,409);assert.equal(body.brokerOrderAllowed,false);
+console.log('v194: 11 safety assertions passed (mocked, no IG broker tests)');

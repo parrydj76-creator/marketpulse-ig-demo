@@ -1323,6 +1323,12 @@ const v193Readiness=require('./v193-readiness').createV193({requireAdmin,pool:v1
 v193Readiness.routes(app);
 void v193Readiness.init().catch(e=>console.error('v193 init failed:',e.message));
 
+// v194: durable operator rehearsal and GET-only broker evidence; NO IG order writes.
+const v194ExecutionLab=require('./v194-execution-lab').createV194({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version)});
+v194ExecutionLab.routes(app);
+void v194ExecutionLab.init().catch(e=>console.error('v194 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
