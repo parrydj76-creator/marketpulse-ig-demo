@@ -1,3 +1,3 @@
-# MarketPulse AI v196
+# MarketPulse AI v197
 
-Start with [README-v196.md](README-v196.md). Previous project files retained.
+Start with [README-v197.md](README-v197.md). Full v196 project included.
