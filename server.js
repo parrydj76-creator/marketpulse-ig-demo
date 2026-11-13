@@ -1329,6 +1329,11 @@ const v194ExecutionLab=require('./v194-execution-lab').createV194({requireAdmin,
 v194ExecutionLab.routes(app);
 void v194ExecutionLab.init().catch(e=>console.error('v194 init failed:',e.message));
 
+// v195: persistent fail-closed audit and readiness gate. No broker write callback.
+const v195Readiness=require('./v195-readiness-gate').createV195({requireAdmin,pool:v125Pool,v194:v194ExecutionLab,v193:v193Readiness});
+v195Readiness.routes(app);
+void v195Readiness.init().catch(e=>console.error('v195 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

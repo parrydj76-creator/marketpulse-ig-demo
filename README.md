@@ -1,3 +1,7 @@
+# MarketPulse AI v195 — Integrity and Recovery Readiness Mega Upgrade
+
+**Start with [README-v195.md](README-v195.md).** This build bundles v194 integrity hotfix and the new v195 read-only audit gate. No broker execution.
+
 # MarketPulse AI v116–v125 Combined Infrastructure Upgrade
 
 **Read-only fail-closed. No IG dealing calls added.** Built from the verified v115 source bundle. Existing v85–v115 runtime modules are retained.

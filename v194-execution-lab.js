@@ -4,8 +4,29 @@ const crypto=require('node:crypto');
 const EPIC='CS.D.EURUSD.MINI.IP';
 const STATES=['PREPARED','SUBMITTING','UNKNOWN','CONFIRMED','PROTECTED','CLOSED','RECONCILED','CANCELLED'];
 const NEXT={PREPARED:['CANCELLED','SUBMITTING'],SUBMITTING:['UNKNOWN','CONFIRMED'],UNKNOWN:['CONFIRMED'],CONFIRMED:['PROTECTED','UNKNOWN'],PROTECTED:['CLOSED','UNKNOWN'],CLOSED:['RECONCILED','UNKNOWN'],RECONCILED:[],CANCELLED:[]};
-const canonical=x=>JSON.stringify(x,Object.keys(x||{}).sort());
-const digest=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
+// Versioned, recursive canonical JSON: invariant to PostgreSQL JSONB key ordering.
+const canonical=x=>JSON.stringify(normalize(x));
+function normalize(x){
+ if(Array.isArray(x))return x.map(normalize);
+ if(x&&typeof x==='object')return Object.fromEntries(Object.keys(x).sort().map(k=>[k,normalize(x[k])]));
+ return x;
+}
+const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
+const digest=x=>sha(canonical(x));
+// v194 originally hashed insertion-ordered JSON before PostgreSQL JSONB reordered keys.
+// Reconstruct ONLY the known original schemas for read-only legacy verification.
+const legacyRead=x=>({at:x.at,epic:x.epic,checks:Object.fromEntries(['market','positions','accounts','confirmation'].filter(k=>Object.prototype.hasOwnProperty.call(x.checks||{},k)).map(k=>[k,legacyCheck(k,x.checks[k])])),brokerStateCertified:x.brokerStateCertified,unknownSubmissionRecovered:x.unknownSubmissionRecovered});
+function legacyCheck(k,x){
+ if(!x||x.ok===false&&Object.prototype.hasOwnProperty.call(x,'error'))return {ok:false,error:x?.error};
+ if(k==='market')return {ok:x.ok,marketStatus:x.marketStatus,brokerTime:x.brokerTime};
+ if(k==='positions')return {ok:x.ok,miniPositions:(x.miniPositions||[]).map(p=>({dealId:p.dealId,stopPresent:p.stopPresent,size:p.size}))};
+ if(k==='accounts')return {ok:x.ok,currencies:x.currencies};
+ return {ok:x.ok,dealStatus:x.dealStatus,dealId:x.dealId,epic:x.epic};
+}
+function legacyEvent(x){
+ return {intentId:x.intentId,from:x.from,to:x.to,fence:x.fence,detail:x.detail?.mode==='REHEARSAL_ONLY'?{mode:x.detail.mode,noBrokerOrder:x.detail.noBrokerOrder}:{reason:x.detail?.reason}};
+}
+const legacyDigest=x=>sha(JSON.stringify(x));
 const uuid=x=>typeof x==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(x);
 const safeErr=e=>String(e?.message||e).replace(/(?:CST|XST|token|password|secret)[^ ,;]*/gi,'[REDACTED]').slice(0,100);
 function createV194({pool,readIG,requireAdmin}){
@@ -34,7 +55,17 @@ function createV194({pool,readIG,requireAdmin}){
  async function brokerRead(x={}){await ensure();if(x.intentId&&!uuid(x.intentId))throw Error('INVALID_INTENT_ID');const paths=[['market','/markets/'+encodeURIComponent(EPIC),'3'],['positions','/positions','2'],['accounts','/accounts','1']];if(x.dealReference){if(!/^[a-zA-Z0-9_-]{4,80}$/.test(x.dealReference))throw Error('INVALID_REFERENCE');paths.push(['confirmation','/confirms/'+encodeURIComponent(x.dealReference),'1']);}
   const checks={};for(const [key,path,version] of paths){try{const data=await readIG(path,version);if(key==='market')checks[key]={ok:data?.instrument?.epic===EPIC,marketStatus:data?.snapshot?.marketStatus??null,brokerTime:data?.snapshot?.updateTime??null};else if(key==='positions')checks[key]={ok:Array.isArray(data?.positions),miniPositions:(data?.positions||[]).filter(p=>p.market?.epic===EPIC).map(p=>({dealId:p.position?.dealId||null,stopPresent:p.position?.stopLevel!=null,size:p.position?.size??null}))};else if(key==='accounts')checks[key]={ok:Array.isArray(data?.accounts),currencies:(data?.accounts||[]).map(a=>a.currency)};else checks[key]={ok:!!data,dealStatus:data?.dealStatus??null,dealId:data?.dealId??null,epic:data?.epic??null};}catch(e){checks[key]={ok:false,error:safeErr(e)};}}
   const payload={at:new Date().toISOString(),epic:EPIC,checks,brokerStateCertified:false,unknownSubmissionRecovered:false};const id=crypto.randomUUID(),hash=digest(payload);await pool.query('INSERT INTO mp_v194_broker_reads(id,intent_id,payload,digest) VALUES($1,$2,$3::jsonb,$4)',[id,x.intentId||null,JSON.stringify(payload),hash]);return {id,...payload,digest:hash,brokerOrderAllowed:false};}
- async function audit(){await ensure();const rows=await pool.query('SELECT id,state,fence,created_at FROM mp_v194_intents ORDER BY created_at DESC LIMIT 100');const reads=await pool.query('SELECT id,payload,digest FROM mp_v194_broker_reads ORDER BY at DESC LIMIT 500');const events=await pool.query('SELECT intent_id,detail,digest FROM mp_v194_events ORDER BY seq DESC LIMIT 500');const failures=[];for(const r of reads.rows)if(digest(r.payload)!==r.digest)failures.push({type:'BROKER_READ_HASH',id:r.id});for(const e of events.rows)if(digest(e.detail)!==e.digest)failures.push({type:'EVENT_HASH',id:e.intent_id});const unresolved=rows.rows.filter(r=>!['CANCELLED','RECONCILED'].includes(r.state));return {verified:failures.length===0,failures,checkedReads:reads.rows.length,checkedEvents:events.rows.length,unresolved:unresolved.length,unresolvedIntents:unresolved.map(r=>({id:r.id,state:r.state,fence:String(r.fence)})),allHistoricalRowsAudited:false,brokerOrderAllowed:false};}
+ async function audit(){await ensure();const rows=await pool.query('SELECT id,state,fence,created_at FROM mp_v194_intents ORDER BY created_at DESC LIMIT 100');const reads=await pool.query('SELECT id,payload,digest FROM mp_v194_broker_reads ORDER BY at DESC LIMIT 500');const events=await pool.query('SELECT intent_id,detail,digest FROM mp_v194_events ORDER BY seq DESC LIMIT 500');const failures=[];let canonicalVerified=0,legacyVerified=0;
+ for(const r of reads.rows){
+  if(digest(r.payload)===r.digest){canonicalVerified++;continue;}
+  if(legacyDigest(legacyRead(r.payload))===r.digest){legacyVerified++;continue;}
+  failures.push({type:'BROKER_READ_HASH',id:r.id});
+ }
+ for(const e of events.rows){
+  if(digest(e.detail)===e.digest){canonicalVerified++;continue;}
+  if(legacyDigest(legacyEvent(e.detail))===e.digest){legacyVerified++;continue;}
+  failures.push({type:'EVENT_HASH',id:e.intent_id});
+ }const unresolved=rows.rows.filter(r=>!['CANCELLED','RECONCILED'].includes(r.state));return {verified:failures.length===0,hashAlgorithm:'CANONICAL_JSON_V2_WITH_LEGACY_V194_VERIFICATION',canonicalVerified,legacyVerified,failures,checkedReads:reads.rows.length,checkedEvents:events.rows.length,unresolved:unresolved.length,unresolvedIntents:unresolved.map(r=>({id:r.id,state:r.state,fence:String(r.fence)})),allHistoricalRowsAudited:false,brokerOrderAllowed:false};}
  function status(){return {version:'194.0.0',epic:EPIC,mode:'READ_ONLY_EXECUTION_LAB',databaseInitialized:ready,capabilities:['DURABLE_REHEARSAL_INTENTS','POSTGRES_TRANSACTION_LOCK_AND_FENCE','STALE_FENCE_REJECTION','GET_ONLY_BROKER_RECONCILIATION','CONFIRMATION_LOOKUP_READ_ONLY','IMMUTABLE_EVENT_DIGESTS','UNRESOLVED_INTENT_AUDIT'],certificationsPassed:0,certificationsRequired:7,brokerWriteIntegration:false,brokerOrderAllowed:false,readyForUnattendedDemo:false};}
  const wrap=fn=>async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req.body||{},req.params||{}));}catch(e){res.status(409).json({error:safeErr(e),brokerOrderAllowed:false});}};
  function routes(app){app.get('/api/v194/status',requireAdmin,(_q,r)=>r.set('Cache-Control','no-store').json(status()));app.post('/api/v194/intent/prepare',requireAdmin,wrap(prepare));app.post('/api/v194/intent/transition',requireAdmin,wrap(transition));app.post('/api/v194/broker/read',requireAdmin,wrap(brokerRead));app.get('/api/v194/audit',requireAdmin,wrap(audit));app.post('/api/v194/order/submit',requireAdmin,(_q,r)=>r.status(409).json({error:'BROKER_EXECUTION_NOT_CERTIFIED',brokerOrderAllowed:false}));}
