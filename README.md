@@ -45,3 +45,7 @@ Optional PostgreSQL rehearsal create (NOT an IG order):
 - This release does not enable unattended demo or live orders.
 - Remaining certification gaps: undelayed market feed, GBP contract pip value and sizing, verified net broker P&L including fees, actual protective-stop lifecycle, unknown-submit/restart broker recovery, and a single-writer lock integrated into any future execution path.
 - Keep the paper simulator paused. Never set execution or auto-start to true.
+
+
+## v193 release
+See [README-v193.md](README-v193.md) for new read-only broker-readiness APIs and tests.
