@@ -1368,6 +1368,12 @@ const v213Controlled=require('./v213-controlled-demo-readiness').createV213({req
 v213Controlled.routes(app);
 void v213Controlled.init().catch(e=>console.error('v213 init failed:',e.message));
 
+// v214-v220: durable preflight, read-only IG reconciliation, recovery rehearsal; no broker writes.
+const v220Preflight=require('./v220-execution-preflight').createV220({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version),v213:v213Controlled});
+v220Preflight.routes(app);
+void v220Preflight.init().catch(e=>console.error('v220 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

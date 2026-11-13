@@ -1,0 +1,53 @@
+'use strict';
+// v214-v220: durable preflight and broker GET reconciliation; deliberately no write adapter.
+const crypto=require('node:crypto');
+const {digest}=require('./v195-readiness-gate');
+const EPIC='CS.D.EURUSD.MINI.IP';
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CERTS=['historicalPaperAccounting','exchangeTimestampAndDelay','gbpPipValueAndDealSize','netDailyPnlAndFees','brokerStopLifecycle','unknownSubmissionRecovery','distributedExecutionLock'];
+const DDL=`CREATE TABLE IF NOT EXISTS mp_v220_events(id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), kind TEXT NOT NULL, payload JSONB NOT NULL, digest TEXT NOT NULL); CREATE INDEX IF NOT EXISTS mp_v220_events_at ON mp_v220_events(created_at,id); CREATE TABLE IF NOT EXISTS mp_v220_intents(id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), epic TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PREPARED','UNKNOWN','RECONCILED_NO_POSITION','MANUAL_REVIEW')), evidence_id UUID NOT NULL REFERENCES mp_v220_events(id), last_checked_at TIMESTAMPTZ); CREATE INDEX IF NOT EXISTS mp_v220_intents_state ON mp_v220_intents(state);`;
+const number=(v)=>typeof v==='number'&&Number.isFinite(v);
+function preflight(b={}){
+ const failures=[];
+ if(b.epic!==EPIC)failures.push('EPIC_MISMATCH');
+ if(b.currency!=='GBP')failures.push('CURRENCY_NOT_GBP');
+ if(!['BUY','SELL'].includes(b.direction))failures.push('INVALID_DIRECTION');
+ for(const k of ['size','gbpPerPipPerUnit','stopPips','spreadPips','slippagePips','roundTripFeesGBP','todayNetLossGBP'])if(!number(b[k]))failures.push('INVALID_'+k);
+ if(!failures.length){
+  if(b.size<=0||b.gbpPerPipPerUnit<=0||b.stopPips<=0||b.spreadPips<0||b.slippagePips<0||b.roundTripFeesGBP<0||b.todayNetLossGBP<0)failures.push('INVALID_NUMERIC_RANGE');
+  if(b.stopPips!==12)failures.push('STOP_NOT_12_PIPS');
+  if(b.spreadPips>2.5)failures.push('SPREAD_OVER_2_5_PIPS');
+ }
+ if(b.contractIndependentlyVerified!==true||!b.contractEvidenceRef)failures.push('CONTRACT_EVIDENCE_REQUIRED');
+ if(b.feesIndependentlyVerified!==true||!b.feeEvidenceRef)failures.push('FEE_EVIDENCE_REQUIRED');
+ if(b.dealSizeIndependentlyVerified!==true||!b.dealSizeEvidenceRef)failures.push('DEAL_SIZE_EVIDENCE_REQUIRED');
+ if(b.quoteAgeMs===undefined||!number(b.quoteAgeMs)||b.quoteAgeMs<0||b.quoteAgeMs>15000)failures.push('QUOTE_STALE_OR_UNVERIFIED');
+ if(b.exchangeTimestampVerified!==true||!b.exchangeTimestampEvidenceRef)failures.push('EXCHANGE_TIMESTAMP_UNVERIFIED');
+ if(b.activePositions!==0)failures.push('POSITION_COUNT_NOT_ZERO');
+ if(b.tradesToday===undefined||!Number.isInteger(b.tradesToday)||b.tradesToday<0||b.tradesToday>=3)failures.push('DAILY_TRADE_LIMIT');
+ const risk=['size','gbpPerPipPerUnit','stopPips','spreadPips','slippagePips','roundTripFeesGBP'].every(k=>number(b[k])) ? (b.stopPips+b.spreadPips+b.slippagePips)*b.gbpPerPipPerUnit*b.size+b.roundTripFeesGBP : null;
+ if(risk!==null&&(risk>25||risk<=0))failures.push('TRADE_RISK_OUTSIDE_25_GBP_CAP');
+ if(risk!==null&&number(b.todayNetLossGBP)&&b.todayNetLossGBP+risk>100)failures.push('DAILY_LOSS_OVER_100_GBP');
+ // Even a fully valid calculation is only a candidate; independent broker certification remains mandatory.
+ return {candidateValid:failures.length===0,estimatedWorstCaseLossGBP:risk===null?null:Number(risk.toFixed(2)),failures,independentlyCertified:false,brokerOrderAllowed:false};
+}
+function createV220({pool,requireAdmin,readIG,v213}={}){
+ if(!pool||typeof requireAdmin!=='function'||typeof readIG!=='function'||!v213)throw Error('V220_DEPENDENCIES_MISSING');
+ let initialized=false;
+ async function init(){await pool.query(DDL);initialized=true;}
+ async function ensure(){if(!initialized)await init();}
+ async function save(kind,payload){await ensure();const id=crypto.randomUUID();const data={kind,...payload,at:new Date().toISOString(),brokerOrderAllowed:false};const hash=digest(data);await pool.query('INSERT INTO mp_v220_events(id,kind,payload,digest) VALUES($1,$2,$3::jsonb,$4)',[id,kind,JSON.stringify(data),hash]);return {id,digest:hash,...data};}
+ async function verify(id){await ensure();if(!UUID.test(id))return {found:false,verified:false,error:'INVALID_ID',brokerOrderAllowed:false};const r=await pool.query('SELECT payload,digest FROM mp_v220_events WHERE id=$1',[id]);return {found:r.rowCount===1,verified:r.rowCount===1&&digest(r.rows[0].payload)===r.rows[0].digest,brokerOrderAllowed:false};}
+ async function audit(){await ensure();const client=await pool.connect();try{await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const n=Number((await client.query('SELECT count(*)::bigint n FROM mp_v220_events')).rows[0].n);if(!Number.isSafeInteger(n)||n>100000){await client.query('ROLLBACK');return {verified:false,fullHistory:false,count:n,reason:'AUDIT_LIMIT_EXCEEDED',brokerOrderAllowed:false};}const r=await client.query('SELECT id,payload,digest FROM mp_v220_events ORDER BY created_at,id');const failures=r.rows.filter(x=>digest(x.payload)!==x.digest).map(x=>x.id);await client.query('COMMIT');return {verified:!failures.length,fullHistory:true,checked:r.rowCount,failures,scope:'mp_v220_events_ONLY',brokerOrderAllowed:false};}catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}finally{client.release();}}
+ async function brokerSnapshot(){const checks={};let positions=null;for(const [key,route,version] of [['market','/markets/'+encodeURIComponent(EPIC),'3'],['positions','/positions','2'],['accounts','/accounts','1']]){try{const r=await readIG(route,version);checks[key]={ok:key==='market'?!!r?.snapshot:key==='positions'?Array.isArray(r?.positions):Array.isArray(r?.accounts)};if(key==='positions'){positions=(r.positions||[]).filter(p=>p.market?.epic===EPIC);checks[key].miniPositions=positions.length;}if(key==='accounts')checks[key].gbpAccounts=(r.accounts||[]).filter(a=>a.currency==='GBP').length;}catch(e){checks[key]={ok:false,error:String(e.message).slice(0,120)};}}return {checks,complete:Object.values(checks).every(c=>c.ok),positions};}
+ async function reconcile(){const snap=await brokerSnapshot();const result=await save('BROKER_READ_ONLY_RECONCILIATION',{checks:snap.checks,complete:snap.complete,certified:false});return result;}
+ async function prepare(b){if(b.confirm!=='PREFLIGHT_ONLY_NO_ORDER')throw Error('PREFLIGHT_CONFIRMATION_REQUIRED');const assessment=preflight(b);const ev=await save('PREFLIGHT',{proposal:b,assessment});return {id:ev.id,assessment,brokerOrderAllowed:false};}
+ async function rehearsal(b){if(b.confirm!=='SIMULATE_UNKNOWN_NO_ORDER')throw Error('SIMULATION_CONFIRMATION_REQUIRED');await ensure();const client=await pool.connect();try{await client.query('BEGIN');const existing=await client.query("SELECT count(*)::int n FROM mp_v220_intents WHERE state IN ('PREPARED','UNKNOWN','MANUAL_REVIEW')");if(existing.rows[0].n>0){await client.query('ROLLBACK');return {created:false,error:'UNRESOLVED_INTENT_EXISTS',brokerOrderAllowed:false};}const id=crypto.randomUUID();const payload={kind:'SIMULATED_UNKNOWN',intentId:id,at:new Date().toISOString(),brokerOrderAllowed:false};const ev=crypto.randomUUID();await client.query('INSERT INTO mp_v220_events(id,kind,payload,digest) VALUES($1,$2,$3::jsonb,$4)',[ev,'SIMULATED_UNKNOWN',JSON.stringify(payload),digest(payload)]);await client.query("INSERT INTO mp_v220_intents(id,epic,state,evidence_id) VALUES($1,$2,'UNKNOWN',$3)",[id,EPIC,ev]);await client.query('COMMIT');return {id,state:'UNKNOWN',created:true,note:'No broker order was sent; manual review required',brokerOrderAllowed:false};}catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}finally{client.release();}}
+ async function reviewUnknown(b){if(!UUID.test(b.id||'')||b.confirm!=='REVIEW_ONLY_NO_ORDER')throw Error('REVIEW_CONFIRMATION_AND_ID_REQUIRED');const snap=await brokerSnapshot();const r=await pool.query('SELECT state FROM mp_v220_intents WHERE id=$1',[b.id]);if(!r.rowCount)throw Error('INTENT_NOT_FOUND');const event=await save('UNKNOWN_REVIEW',{intentId:b.id,checks:snap.checks,observedPositions:snap.checks.positions?.miniPositions,complete:snap.complete,warning:'GET snapshots cannot prove no historical fill or certify recovery'});await pool.query("UPDATE mp_v220_intents SET state='MANUAL_REVIEW',last_checked_at=now() WHERE id=$1 AND state='UNKNOWN'",[b.id]);return {id:b.id,state:'MANUAL_REVIEW',evidenceId:event.id,checks:snap.checks,brokerOrderAllowed:false};}
+ async function readiness(){const [own,prior,unresolved]=await Promise.all([audit(),v213.readiness(),pool.query("SELECT id,state,created_at FROM mp_v220_intents WHERE state IN ('PREPARED','UNKNOWN','MANUAL_REVIEW') ORDER BY created_at LIMIT 50")]);return {version:'220.0.0',audit:own,priorAudit:prior.audit,unresolvedIntents:unresolved.rows,certifications:Object.fromEntries(CERTS.map(k=>[k,{independentlyCertified:false}])),certificationsPassed:0,certificationsRequired:7,blockers:['INDEPENDENT_BROKER_CERTIFICATIONS_OUTSTANDING','NO_CERTIFIED_BROKER_WRITE_ADAPTER','NO_REAL_BROKER_STOP_LIFECYCLE_TEST','NO_BROKER_SUBMISSION_RECOVERY_PROOF','NO_BROKER_INTEGRATED_FENCING',...(!own.verified?['V220_AUDIT_FAILURE']:[]),...(unresolved.rowCount?['UNRESOLVED_INTENT_REQUIRES_REVIEW']:[])],brokerOrderAllowed:false,readyForControlledDemo:false,readyForUnattendedDemo:false};}
+ const status=()=>({version:'220.0.0',versionsIncluded:['214','215','216','217','218','219','220'],databaseInitialized:initialized,mode:'DURABLE_PREFLIGHT_AND_READ_ONLY_RECONCILIATION',epic:EPIC,brokerWriteIntegration:false,brokerOrderAllowed:false,readyForUnattendedDemo:false});
+ const wrap=fn=>(req,res)=>Promise.resolve().then(()=>fn(req.body||{},req)).then(data=>res.json(data)).catch(e=>res.status(400).json({error:String(e.message).slice(0,180),brokerOrderAllowed:false}));
+ function routes(app){app.get('/api/v220/status',requireAdmin,wrap(status));app.get('/api/v220/readiness',requireAdmin,wrap(readiness));app.get('/api/v220/audit',requireAdmin,wrap(audit));app.get('/api/v220/evidence/:id/verify',requireAdmin,wrap((b,r)=>verify(r.params.id)));app.post('/api/v220/broker/reconcile',requireAdmin,wrap(reconcile));app.post('/api/v220/preflight',requireAdmin,wrap(prepare));app.post('/api/v220/recovery/simulate-unknown',requireAdmin,wrap(rehearsal));app.post('/api/v220/recovery/review',requireAdmin,wrap(reviewUnknown));for(const p of ['/api/v220/order/submit','/api/v220/trading/arm','/api/v220/trading/auto-start'])app.post(p,requireAdmin,(_req,res)=>res.status(409).json({error:'BROKER_EXECUTION_NOT_CERTIFIED',brokerOrderAllowed:false}));}
+ return {init,routes,status,readiness,audit,verify};
+}
+module.exports={createV220,preflight};
