@@ -1305,6 +1305,12 @@ v180Evidence.routes(app);
 void v180Evidence.init().catch(e=>console.error('v180 evidence schema init failed:',e.message));
 void v160Readiness.init().catch(e=>console.error('v160 rehearsal lease init failed:',e.message));
 
+// v190 authenticated read-only IG evidence and fenced operator preparation; NO broker writes.
+const v190BrokerEvidence=require('./v190-broker-evidence').createV190({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version)});
+v190BrokerEvidence.routes(app);
+void v190BrokerEvidence.init().catch(e=>console.error('v190 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

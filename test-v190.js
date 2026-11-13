@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {riskPreview,createV190}=require('./v190-broker-evidence');
+const good={epic:'CS.D.EURUSD.MINI.IP',dealSize:0.1,minimumDealSize:0.1,dealSizeStep:0.1,pipSize:0.0001,usdPerPipPerDealUnit:1,gbpPerUsd:0.8,stopPips:12,contractDocumentRef:'independent-document',fxSourceRef:'independent-fx',fxObservedAt:new Date().toISOString()};
+assert.equal(riskPreview(good).validCandidate,true);
+assert.equal(riskPreview(good).independentlyCertified,false);
+assert.equal(riskPreview({...good,epic:'WRONG'}).validCandidate,false);
+assert.equal(riskPreview({...good,dealSize:10}).validCandidate,false);
+assert.equal(riskPreview({...good,dealSize:0.15}).validCandidate,false);
+assert.equal(riskPreview({...good,fxObservedAt:'2020-01-01'}).validCandidate,false);
+const v=createV190({requireAdmin:(a,b,c)=>c(),pool:{query:async()=>({})},readIG:async()=>{throw Error('NO_TEST_BROKER_CALL')}});
+assert.equal(v.status().brokerOrderAllowed,false);
+assert.equal(v.status().readyForUnattendedDemo,false);
+console.log('v190 safety checks: 8/8 passed');
