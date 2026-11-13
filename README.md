@@ -1,3 +1,3 @@
-# MarketPulse AI combined v199–v203
+# MarketPulse AI v205–v208 combined upgrade
 
-Read [README-v203.md](README-v203.md) before deploying. Broker writes remain disabled in the new module.
+See `README-v208.md` for installation, Render Shell tests, evidence checks, limitations and broker safety restrictions. Existing earlier README files are retained.

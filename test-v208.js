@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {accountingCheck,timestampCheck,lifecycleCheck,recoveryCheck}=require('./v208-certification-workbench');
+assert.equal(accountingCheck({}).arithmeticConsistent,false);
+assert.equal(accountingCheck({transactions:[{id:'a',netGBP:3}],brokerNetGBP:3,openingBalanceGBP:100,closingBalanceGBP:103,cashFlowsGBP:0,paginationComplete:true,feesComplete:true,currency:'GBP',sourceRef:'ig',statementRef:'statement'}).arithmeticConsistent,true);
+assert.equal(accountingCheck({transactions:[{id:'a',netGBP:3},{id:'a',netGBP:3}],brokerNetGBP:6,openingBalanceGBP:100,closingBalanceGBP:106,cashFlowsGBP:0,paginationComplete:true,feesComplete:true,currency:'GBP',sourceRef:'ig',statementRef:'statement'}).arithmeticConsistent,false);
+assert.equal(timestampCheck({}).candidateValid,false);
+assert.equal(lifecycleCheck({}).candidateValid,false);
+assert.equal(recoveryCheck({}).candidateValid,false);
+const fs=require('node:fs');const src=fs.readFileSync(require('node:path').join(__dirname,'server.js'),'utf8');
+assert(src.indexOf('v208Certification.routes(app)')<src.indexOf("app.get('*'"));
+assert(src.indexOf('v203Combined.routes(app)')<src.indexOf("app.get('*'"));
+console.log('v208 tests passed (7 checks); no broker writes');
