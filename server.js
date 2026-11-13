@@ -1404,6 +1404,12 @@ const v255Workbench=require('./v255-verification-workbench').createV255({require
 v255Workbench.routes(app);
 void v255Workbench.init().catch(e=>console.error('v255 init failed:',e.message));
 
+// v256-v270: fail-closed unattended shadow readiness. No IG write adapter.
+const v270Readiness=require('./v270-unattended-readiness').createV270({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version)});
+v270Readiness.routes(app);
+void v270Readiness.init().catch(e=>console.error('v270 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessMarket,riskStress}=require('./v270-unattended-readiness');
+const now=Date.parse('2026-11-13T14:40:00Z');
+const m={instrument:{epic:'CS.D.EURUSD.MINI.IP'},dealingRules:{minDealSize:{unit:'POINTS',value:0.1}},snapshot:{marketStatus:'TRADEABLE',bid:1.1047,offer:1.1048,updateTime:'14:39:59',delayTime:0}};
+const check=assessMarket(m,now);
+assert.equal(check.readyForBrokerOrders,false);
+assert.ok(check.reasons.includes('UNAMBIGUOUS_UTC_FRESHNESS_MISSING'));
+assert.ok(check.reasons.includes('DEAL_INCREMENT_UNVERIFIED'));
+const b={size:0.1,stopPips:12,pipValueGBPPerPipPerSize:7.7,spreadPips:0.9,commissionGBP:0,slippageGBP:1,conversionBufferGBP:1,dailyLossGBP:0,tradesToday:0,openPositions:0};
+const r=riskStress(b);
+assert.ok(Math.abs(r.baseIllustrativeGBP-11.933)<1e-9);
+assert.equal(r.stressScenarios.length,5);
+assert.equal(r.brokerOrderAllowed,false);
+assert.equal(r.certified,false);
+assert.ok(r.errors.includes('UNBOUNDED_GAP_LOSS_POSSIBLE'));
+console.log('v270 focused unit tests passed (not broker certification)');
