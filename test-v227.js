@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessPlan,createV227}=require('./v227-execution-certification');
+const base={epic:'CS.D.EURUSD.MINI.IP',accountCurrency:'GBP',direction:'BUY',size:0.1,gbpPerPipPerUnit:1,stopPips:12,spreadPips:1,slippagePips:1,roundTripFeesGBP:1,dailyNetLossGBP:0,quoteAgeMs:500,tradesToday:0,openPositions:0,contractSource:'broker-doc-reference',feeSource:'transaction-reference',dealSizeSource:'broker-rule-reference',timestampSource:'exchange-timestamp-reference'};
+assert.equal(assessPlan(base).policyCandidate,true);
+assert.equal(assessPlan(base).brokerOrderAllowed,false);
+assert.equal(assessPlan({...base,quoteAgeMs:16000}).policyCandidate,false);
+assert.equal(assessPlan({...base,spreadPips:3}).policyCandidate,false);
+assert.equal(assessPlan({...base,openPositions:1}).policyCandidate,false);
+assert.equal(assessPlan({...base,tradesToday:3}).policyCandidate,false);
+assert.equal(assessPlan({...base,gbpPerPipPerUnit:100}).policyCandidate,false);
+assert.equal(assessPlan({...base,contractSource:''}).policyCandidate,false);
+assert.equal(assessPlan({...base,dailyNetLossGBP:99}).policyCandidate,false);
+assert.throws(()=>createV227({}),/DEPENDENCIES/);
+console.log('v227: 10 local fail-closed assertions passed');

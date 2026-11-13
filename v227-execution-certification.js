@@ -1,0 +1,57 @@
+'use strict';
+// v221-v227: broker GET evidence, durable non-executable intent plans, fencing drills and fail-closed gates.
+// Deliberately accepts NO broker write callback. Never calls POST/PUT/DELETE to IG.
+const crypto=require('node:crypto');
+const {digest}=require('./v195-readiness-gate');
+const EPIC='CS.D.EURUSD.MINI.IP';
+const CERTS=['historicalPaperAccounting','exchangeTimestampAndDelay','gbpPipValueAndDealSize','netDailyPnlAndFees','brokerStopLifecycle','unknownSubmissionRecovery','distributedExecutionLock'];
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DDL=`CREATE TABLE IF NOT EXISTS mp_v227_evidence(id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), kind TEXT NOT NULL, payload JSONB NOT NULL, digest TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS mp_v227_evidence_created ON mp_v227_evidence(created_at,id);
+CREATE TABLE IF NOT EXISTS mp_v227_plans(id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), epic TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PREPARED','REVIEW_REQUIRED','REJECTED')), evidence_id UUID NOT NULL REFERENCES mp_v227_evidence(id), operator_note TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS mp_v227_fence(name TEXT PRIMARY KEY, epoch BIGINT NOT NULL DEFAULT 0, owner UUID, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());`;
+const finite=v=>typeof v==='number'&&Number.isFinite(v);
+function assessPlan(b={}){
+ const errors=[];
+ if(b.epic!==EPIC)errors.push('WRONG_EPIC');
+ if(b.accountCurrency!=='GBP')errors.push('GBP_ACCOUNT_REQUIRED');
+ if(!['BUY','SELL'].includes(b.direction))errors.push('INVALID_DIRECTION');
+ for(const k of ['size','gbpPerPipPerUnit','stopPips','spreadPips','slippagePips','roundTripFeesGBP','dailyNetLossGBP','quoteAgeMs'])if(!finite(b[k]))errors.push('INVALID_'+k);
+ if(!errors.some(e=>e.startsWith('INVALID_'))){
+  if(b.size<=0||b.gbpPerPipPerUnit<=0||b.stopPips<=0||b.spreadPips<0||b.slippagePips<0||b.roundTripFeesGBP<0||b.dailyNetLossGBP<0||b.quoteAgeMs<0)errors.push('INVALID_NUMERIC_RANGE');
+  if(b.stopPips!==12)errors.push('STOP_DISTANCE_POLICY');
+  if(b.spreadPips>2.5)errors.push('SPREAD_LIMIT');
+  if(b.quoteAgeMs>15000)errors.push('STALE_QUOTE');
+ }
+ if(!Number.isInteger(b.tradesToday)||b.tradesToday<0||b.tradesToday>=3)errors.push('DAILY_TRADE_LIMIT');
+ if(b.openPositions!==0)errors.push('POSITION_LIMIT');
+ // Evidence references are unverified claims, never independent certification.
+ for(const k of ['contractSource','feeSource','dealSizeSource','timestampSource'])if(typeof b[k]!=='string'||b[k].length<8)errors.push('SOURCE_MISSING_'+k);
+ const hasNumbers=['size','gbpPerPipPerUnit','stopPips','spreadPips','slippagePips','roundTripFeesGBP','dailyNetLossGBP'].every(k=>finite(b[k]));
+ const estimatedRiskGBP=hasNumbers?(b.stopPips+b.spreadPips+b.slippagePips)*b.gbpPerPipPerUnit*b.size+b.roundTripFeesGBP:null;
+ if(estimatedRiskGBP!==null&&(!Number.isFinite(estimatedRiskGBP)||estimatedRiskGBP<=0||estimatedRiskGBP>25))errors.push('RISK_OVER_25_GBP');
+ if(estimatedRiskGBP!==null&&b.dailyNetLossGBP+estimatedRiskGBP>100)errors.push('DAILY_LOSS_LIMIT');
+ return {policyCandidate:errors.length===0,estimatedRiskGBP:estimatedRiskGBP===null?null:Number(estimatedRiskGBP.toFixed(4)),errors,sourceClaimsNotIndependentlyVerified:true,brokerOrderAllowed:false};
+}
+function createV227({pool,requireAdmin,readIG,v220}={}){
+ if(!pool||typeof requireAdmin!=='function'||typeof readIG!=='function'||!v220)throw Error('V227_DEPENDENCIES_MISSING');
+ let initialized=false;
+ async function init(){await pool.query(DDL);initialized=true;}
+ async function ensure(){if(!initialized)await init();}
+ async function store(kind,fields){await ensure();const id=crypto.randomUUID();const payload={kind,at:new Date().toISOString(),...fields,brokerOrderAllowed:false};const hash=digest(payload);await pool.query('INSERT INTO mp_v227_evidence(id,kind,payload,digest) VALUES($1,$2,$3::jsonb,$4)',[id,kind,JSON.stringify(payload),hash]);return {id,digest:hash,...payload};}
+ async function verify(id){await ensure();if(!UUID.test(id))return {found:false,verified:false,reason:'INVALID_ID',brokerOrderAllowed:false};const r=await pool.query('SELECT payload,digest FROM mp_v227_evidence WHERE id=$1',[id]);return {found:r.rowCount===1,verified:r.rowCount===1&&digest(r.rows[0].payload)===r.rows[0].digest,brokerOrderAllowed:false};}
+ async function audit(){await ensure();const client=await pool.connect();try{await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const count=Number((await client.query('SELECT count(*)::bigint AS n FROM mp_v227_evidence')).rows[0].n);if(!Number.isSafeInteger(count)||count>100000){await client.query('ROLLBACK');return {verified:false,fullHistory:false,reason:'AUDIT_LIMIT_EXCEEDED',count,brokerOrderAllowed:false};}const rows=await client.query('SELECT id,payload,digest FROM mp_v227_evidence ORDER BY created_at,id');const failures=rows.rows.filter(x=>digest(x.payload)!==x.digest).map(x=>x.id);await client.query('COMMIT');return {verified:failures.length===0,fullHistory:true,checked:rows.rowCount,failures,scope:'mp_v227_evidence_ONLY',brokerOrderAllowed:false};}catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}finally{client.release();}}
+ async function igRead(){const checks={};const data={};for(const [name,url,version] of [['market','/markets/'+encodeURIComponent(EPIC),'3'],['positions','/positions','2'],['accounts','/accounts','1']]){try{const r=await readIG(url,version);if(name==='market'){checks.market={ok:!!r?.snapshot,marketStatus:r?.snapshot?.marketStatus||null,rawBrokerTime:r?.snapshot?.updateTime||null,brokerTimestampCertified:false};data.market=r?.snapshot?.marketStatus||null;}if(name==='positions'){const arr=Array.isArray(r?.positions)?r.positions:null;checks.positions={ok:!!arr,miniPositions:arr?arr.filter(p=>p.market?.epic===EPIC).length:null};}if(name==='accounts'){const arr=Array.isArray(r?.accounts)?r.accounts:null;checks.accounts={ok:!!arr,gbpAccounts:arr?arr.filter(a=>a.currency==='GBP').length:null};}}catch(e){checks[name]={ok:false,error:String(e.message).slice(0,140)};}}return {checks,complete:Object.values(checks).every(x=>x.ok),brokerOrderAllowed:false};}
+ async function snapshot(){const r=await igRead();return store('BROKER_READ_ONLY_SNAPSHOT',{...r,independentlyCertified:false});}
+ async function plan(b){if(b.confirm!=='PREPARE_ONLY_NO_ORDER')throw Error('PREPARE_CONFIRMATION_REQUIRED');const assessment=assessPlan(b);const id=crypto.randomUUID();const client=await pool.connect();try{await client.query('BEGIN');const ev=crypto.randomUUID();const payload={kind:'NON_EXECUTABLE_PLAN',at:new Date().toISOString(),planId:id,proposal:b,assessment,brokerOrderAllowed:false};await client.query('INSERT INTO mp_v227_evidence(id,kind,payload,digest) VALUES($1,$2,$3::jsonb,$4)',[ev,'NON_EXECUTABLE_PLAN',JSON.stringify(payload),digest(payload)]);await client.query('INSERT INTO mp_v227_plans(id,epic,state,evidence_id) VALUES($1,$2,$3,$4)',[id,EPIC,assessment.policyCandidate?'PREPARED':'REJECTED',ev]);await client.query('COMMIT');return {id,evidenceId:ev,state:assessment.policyCandidate?'PREPARED':'REJECTED',assessment,brokerOrderAllowed:false};}catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}finally{client.release();}}
+ async function review(b){if(!UUID.test(b.id||'')||b.confirm!=='REVIEW_ONLY_NO_ORDER')throw Error('REVIEW_CONFIRMATION_REQUIRED');await ensure();const r=await pool.query("UPDATE mp_v227_plans SET state='REVIEW_REQUIRED',updated_at=now(),operator_note=$2 WHERE id=$1 AND state='PREPARED' RETURNING id,state",[b.id,String(b.note||'').slice(0,300)]);if(!r.rowCount)return {updated:false,reason:'NOT_FOUND_OR_NOT_PREPARED',brokerOrderAllowed:false};const e=await store('OPERATOR_REVIEW',{planId:b.id,reviewOnly:true});return {updated:true,state:'REVIEW_REQUIRED',evidenceId:e.id,brokerOrderAllowed:false};}
+ // Fencing drill demonstrates monotonic PostgreSQL epochs, NOT broker-integrated locking.
+ async function fenceDrill(b){if(b.confirm!=='SIMULATE_FENCING_NO_ORDER')throw Error('FENCING_CONFIRMATION_REQUIRED');await ensure();const owner=crypto.randomUUID();const c=await pool.connect();try{await c.query('BEGIN');await c.query("INSERT INTO mp_v227_fence(name,epoch) VALUES('demo-drill',0) ON CONFLICT DO NOTHING");const r=await c.query("UPDATE mp_v227_fence SET epoch=epoch+1,owner=$1,updated_at=now() WHERE name='demo-drill' RETURNING epoch",[owner]);await c.query('COMMIT');const e=await store('FENCING_DRILL',{epoch:String(r.rows[0].epoch),owner,brokerIntegrated:false});return {epoch:String(r.rows[0].epoch),evidenceId:e.id,brokerIntegrated:false,brokerOrderAllowed:false};}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
+ async function recoveryDrill(b){if(b.confirm!=='RECONCILE_ONLY_NO_ORDER')throw Error('RECOVERY_CONFIRMATION_REQUIRED');const snap=await igRead();const e=await store('UNKNOWN_OUTCOME_RECONCILIATION_DRILL',{checks:snap.checks,complete:snap.complete,actualUnknownSubmissionTested:false,doNotResubmit:true});return {evidenceId:e.id,checks:snap.checks,actualUnknownSubmissionTested:false,doNotResubmit:true,brokerOrderAllowed:false};}
+ async function readiness(){const [own,previous,plans]=await Promise.all([audit(),v220.readiness(),pool.query("SELECT state,count(*)::int AS n FROM mp_v227_plans GROUP BY state")]);const planCounts=Object.fromEntries(plans.rows.map(r=>[r.state,r.n]));return {version:'227.0.0',audit:own,priorAudit:previous.audit,planCounts,certifications:Object.fromEntries(CERTS.map(k=>[k,{independentlyCertified:false}])),certificationsPassed:0,certificationsRequired:7,blockers:['INDEPENDENT_GBP_PIP_AND_FEE_CERTIFICATION_REQUIRED','REAL_PROTECTIVE_STOP_LIFECYCLE_REQUIRED','BROKER_UNKNOWN_OUTCOME_RECOVERY_REQUIRED','BROKER_INTEGRATED_DISTRIBUTED_FENCING_REQUIRED','BROKER_WRITE_ADAPTER_NOT_IMPLEMENTED','UNATTENDED_DEMO_NOT_APPROVED',...(!own.verified?['EVIDENCE_AUDIT_FAILED']:[])],brokerOrderAllowed:false,readyForControlledDemo:false,readyForUnattendedDemo:false};}
+ const status=()=>({version:'227.0.0',versionsIncluded:['221','222','223','224','225','226','227'],databaseInitialized:initialized,mode:'BROKER_GET_AND_DURABLE_EXECUTION_CERTIFICATION_LAB',epic:EPIC,brokerWriteIntegration:false,brokerOrderAllowed:false,readyForUnattendedDemo:false});
+ const wrap=fn=>(req,res)=>Promise.resolve().then(()=>fn(req.body||{},req)).then(r=>res.json(r)).catch(e=>res.status(400).json({error:String(e.message).slice(0,180),brokerOrderAllowed:false}));
+ function routes(app){app.get('/api/v227/status',requireAdmin,wrap(status));app.get('/api/v227/readiness',requireAdmin,wrap(readiness));app.get('/api/v227/audit',requireAdmin,wrap(audit));app.get('/api/v227/evidence/:id/verify',requireAdmin,wrap((b,r)=>verify(r.params.id)));app.post('/api/v227/broker/snapshot',requireAdmin,wrap(snapshot));app.post('/api/v227/plan/prepare',requireAdmin,wrap(plan));app.post('/api/v227/plan/review',requireAdmin,wrap(review));app.post('/api/v227/fencing/drill',requireAdmin,wrap(fenceDrill));app.post('/api/v227/recovery/drill',requireAdmin,wrap(recoveryDrill));for(const p of ['/api/v227/order/submit','/api/v227/trading/arm','/api/v227/trading/auto-start'])app.post(p,requireAdmin,(_req,res)=>res.status(409).json({error:'BROKER_WRITE_HARD_BLOCKED_UNCERTIFIED',brokerOrderAllowed:false}));}
+ return {init,routes,status,readiness,audit,verify};
+}
+module.exports={createV227,assessPlan};
