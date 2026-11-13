@@ -1,31 +1,32 @@
-# MarketPulse AI v195 — Integrity and Recovery Readiness Mega Upgrade
+# MarketPulse AI v195 — Integrity Recovery and Execution Safety Gate
 
-This bundle includes the v194 canonical SHA-256 integrity hotfix, original v194 legacy-record verification and a new v195 persistent audit/readiness gate. It preserves the existing v193/v194 read-only capabilities. **No broker orders can be placed by v195.**
+## Scope
+This is a major **read-only safety upgrade**, NOT unattended IG DEMO execution. Broker submission remains hard-blocked. Seven certifications remain 0/7. It includes the v194 canonical JSON digest hotfix, with a strict legacy reconstruction check for historical v194 rows (no automatic rewriting or bypass).
+
+## Changes
+- v194: canonical, recursively key-sorted JSON hashing for new broker-read and event records; narrowly scoped legacy v194 verification for old records.
+- v195: independent seven-certification readiness gate, immutable SHA-256 protected assessments, PostgreSQL JSONB write/read digest check, paginated gate audit with explicit incomplete-scope flag, blocking on any unresolved v194 intent or failed hash.
+- All endpoints require the existing admin-token middleware.
+- No IG POST, PUT or DELETE is passed into the v194/v195 modules.
+- Existing v194 intent records and hashes are never overwritten.
 
 ## Install
-Back up the repository. Copy the contents of this ZIP into the repository root, commit and redeploy Render. The new v195 module is registered in server.js. Do not enable broker execution; keep `BROKER_DEMO_EXECUTION=false` and `AUTO_START=false`. No environment secrets are bundled.
+Back up the current GitHub repository and PostgreSQL database. Upload this ZIP's contents to the repository root, preserving existing Render environment variables and secrets. Redeploy. DO NOT enable `BROKER_DEMO_EXECUTION` or `AUTO_START`.
 
-## Render Shell
-
+## Render Shell verification
 ```bash
 BASE="http://127.0.0.1:${PORT:-10000}"
 curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v194/audit" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/v194/broker/read" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v194/audit" | python3 -m json.tool
 curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/status" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/readiness" | python3 -m json.tool
-curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/audit/run" | python3 -m json.tool
-curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/audit/integrity" | python3 -m json.tool
+curl -sS --fail-with-body -X POST -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/gate/capture" | python3 -m json.tool
+curl -sS --fail-with-body -H "X-Admin-Token: $ADMIN_TOKEN" "$BASE/api/v195/gate/audit" | python3 -m json.tool
 ```
+Expected: `v194/audit.verified=true`, `failures=[]`, old records counted as `legacyVerified`; new records as `canonicalVerified`. `v195/gate/capture.roundTripVerified=true`, `v195/gate/audit.verified=true`, `complete=true`. If any verification fails, stop; do not delete evidence. If the old records fail under the legacy algorithm, investigate the precise schema rather than treating them as valid.
 
-To verify a specific persisted audit across a Render restart: `GET /api/v195/audit/verify/<id>` with admin token.
-
-## Important distinctions
-
-- `verified: false` on `/api/v195/audit/run` means the readiness gate is **blocked**, not that the SHA-256 hash is invalid. Check `/api/v195/audit/integrity` or `/api/v195/audit/verify/<id>` for cryptographic integrity.
-- Existing v194 records are not modified. Canonical v194 digests are verified directly; legacy digests are verified against known legacy field ordering only. Inspect `legacyVerified` and `failures` in `/api/v194/audit`.
-- Audits cover bounded samples, not all historical rows. The readiness gate therefore remains blocked.
-- Broker execution certification remains **0/7**. No actual stop, unknown submission, or distributed broker write-path certification has been performed.
-- The old server.js contains separate legacy routes. Its broker execution is hardcoded off. Do not change this or assume v195 protects an independently modified legacy execution path.
-
-## Local tests
-
-`node test-v194.js && node test-v195.js` (mocked tests; requires actual PostgreSQL and IG DEMO smoke tests before operational claims).
+## Limitations and next milestone
+- No independent broker contract/pip sizing certification, exchange timestamp proof, daily accounting reconciliation, broker-backed stop lifecycle, unknown-submission recovery or broker-path fencing.
+- Database tests included in `test-v195.js` use a mock pool. Real PostgreSQL round-trip and live IG tests must be completed on Render.
+- Historical v194 audit is limited to the latest 500 broker reads/events, and v195's own audit caps at 20,000 records. Neither implies all-history verification.
+- This release does not establish exactly-once IG execution or enable unattended demo trading.
