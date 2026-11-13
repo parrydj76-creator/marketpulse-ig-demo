@@ -1362,6 +1362,12 @@ const v208Certification=require('./v208-certification-workbench').createV208({re
 v208Certification.routes(app);
 void v208Certification.init().catch(e=>console.error('v208 init failed:',e.message));
 
+// v209-v213: read-only broker evidence, supervised lifecycle/restart checklists, no IG writes.
+const v213Controlled=require('./v213-controlled-demo-readiness').createV213({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version),v208:v208Certification});
+v213Controlled.routes(app);
+void v213Controlled.init().catch(e=>console.error('v213 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
