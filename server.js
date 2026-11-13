@@ -1395,3 +1395,13 @@ setInterval(()=>{checkRestSnapshot().catch(e=>log('REST snapshot check: '+e.mess
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;init()}},30000);
 
 setInterval(()=>{if(probeStartedAt&&accepted.size>0&&[...diagnostics.values()].every(x=>x.updates===0)){log('Diagnostic watchdog: accepted subscriptions but no onItemUpdate callbacks yet');}},300000);
+// v198: no broker write callback; read-only safety, restart, and fault evidence.
+const v198ReadinessLab=require('./v198-readiness-lab').createV198({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version),v197:v197OperatorLab,v196:v196SafetyLab});
+v198ReadinessLab.routes(app);
+void v198ReadinessLab.init().catch(e=>console.error('v198 init failed:',e.message));
+
+// v199-v203 consolidated readiness module: GET-only, no broker write adapter.
+const v203Combined=require('./v203-combined-readiness').createV203({requireAdmin,pool:v125Pool,readIG:(route,version)=>api(route,'GET',null,version),v198:v198ReadinessLab});
+v203Combined.routes(app);
+void v203Combined.init().catch(e=>console.error('v203 init failed:',e.message));

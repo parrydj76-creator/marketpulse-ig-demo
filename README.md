@@ -1,3 +1,3 @@
-# MarketPulse AI v197
+# MarketPulse AI combined v199–v203
 
-Start with [README-v197.md](README-v197.md). Full v196 project included.
+Read [README-v203.md](README-v203.md) before deploying. Broker writes remain disabled in the new module.
