@@ -1398,6 +1398,12 @@ const v250Foundation=require('./v242-execution-foundation').createV242({requireA
 v250Foundation.routes(app);
 void v250Foundation.init().catch(e=>console.error('v250 foundation init failed:',e.message));
 
+// v251-v255 read-only verification and operator review; no IG broker writes.
+const v255Workbench=require('./v255-verification-workbench').createV255({requireAdmin,pool:v125Pool,
+ readIG:(route,version)=>api(route,'GET',null,version)});
+v255Workbench.routes(app);
+void v255Workbench.init().catch(e=>console.error('v255 init failed:',e.message));
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

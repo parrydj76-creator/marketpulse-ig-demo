@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {contractReport,freshness,riskScenario}=require('./v255-verification-workbench');
+const m={instrument:{epic:'CS.D.EURUSD.MINI.IP',valueOfOnePip:'1',currencies:[{code:'USD'}]},dealingRules:{minDealSize:{value:0.1,unit:'POINTS'},minNormalStopOrLimitDistance:{value:2,unit:'POINTS'}},snapshot:{marketStatus:'TRADEABLE',bid:1.10472,offer:1.10481,updateTime:'14:27:50'}};
+const c=contractReport(m);assert.equal(c.minDealSize.value,0.1);assert.equal(c.quoteCurrency,'USD');assert.equal(c.independentlyVerified,false);
+assert.equal(freshness(m).authenticatedFreshnessVerified,false);
+const f=freshness({snapshot:{updateTimeUTC:'2026-11-13T14:28:00Z',delayTime:0}},Date.parse('2026-11-13T14:28:05Z'));
+assert.equal(f.authenticatedFreshnessVerified,true);
+assert.equal(freshness({snapshot:{updateTimeUTC:'2026-11-13T14:28:00Z'}},Date.parse('2026-11-13T14:28:05Z')).authenticatedFreshnessVerified,false);
+const r=riskScenario({size:0.1,stopPips:12,pipValueGBPPerPipPerSize:7.7,spreadPips:0.9,commissionGBP:1,slippageGBP:2,conversionBufferGBP:1,dailyRealizedLossGBP:0,maxRiskGBP:25,tradesToday:0});
+assert.equal(r.illustrativeOnly,true);assert.equal(r.brokerOrderAllowed,false);assert.ok(r.illustrativeWorstCaseGBP>0);
+assert.ok(r.errors.includes('CLIENT_INPUTS_NOT_INDEPENDENTLY_CERTIFIED'));
+console.log('v255 pure checks passed (contract, freshness, illustrative risk).');
