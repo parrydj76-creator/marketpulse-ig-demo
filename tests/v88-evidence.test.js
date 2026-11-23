@@ -1,0 +1,6 @@
+ 'use strict';const test=require('node:test'),assert=require('node:assert/strict');const {inspectEvents,riskExamples,failureScenarios,createEvidence}=require('../marketpulse-v88-evidence');
+test('synthetic risk arithmetic',()=>{const r=riskExamples();assert.equal(r[0].estimatedGBP,9.24);assert.equal(r[1].withinSyntheticLimit,false);});
+test('unmatched close detected',()=>{const x=inspectEvents([{kind:'CLOSED',epic:'FX',at:'2026-01-01',pnlPips:2}]);assert.equal(x.paired,0);assert.ok(x.anomalies[0].startsWith('UNMATCHED_CLOSE'));});
+test('paired open/close detected',()=>{const x=inspectEvents([{kind:'CLOSED',epic:'FX',at:'2026-01-02',pnlPips:5,reason:'SIM_TARGET'},{kind:'OPENED',epic:'FX',at:'2026-01-01'}]);assert.equal(x.paired,1);assert.equal(x.netSimulatedPips,5);});
+test('fault scenarios are not certified',()=>{assert.ok(failureScenarios().every(x=>x.verifiedWithBroker===false));});
+test('missing journal cannot enable shadow gate',()=>{const r=createEvidence({dataDir:'/unlikely-nonexistent-dir',getShadow:()=>({active:[],restoreStatus:'NEW'}),getReadiness:()=>({markets:[]}),getMemory:()=>430,getStorage:()=>({configured:true,healthy:true}),getWorkbench:()=>({})}).report();assert.equal(r.shadowGateOpen,false);assert.equal(r.certifications.brokerOrdersAllowed,false);});
