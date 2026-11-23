@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='9.1.0';
+const APP_VERSION='9.5.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1587,6 +1587,11 @@ app.get('/api/admin/v91/lab',requireAdmin,(_req,res)=>res.set('Cache-Control','n
 app.post('/api/admin/v91/inspect',requireAdmin,async(_req,res)=>{try{res.set('Cache-Control','no-store').json(await v91Lab.inspect())}catch(e){res.status(e.status||502).json({error:String(e.message||e)})}});
 app.post('/api/admin/v91/kill',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v91Lab.engage('OPERATOR_REQUEST')));
 
+// v9.2-v9.5 combined: on-demand, GET-only IG evidence; no broker execution integration.
+const v95Lab=require('./marketpulse-v95-safety').createLab({dataDir:DATA_DIR,readIG:(route,version)=>api(route,'GET',null,version),getReadiness:()=>v79Readiness(),getMemory:()=>Math.round(process.memoryUsage().rss/1048576),getStorage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy})});
+app.get('/api/admin/v95/lab',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v95Lab.report()));
+app.post('/api/admin/v95/inspect',requireAdmin,async(_req,res)=>{try{res.set('Cache-Control','no-store').json(await v95Lab.inspect())}catch(e){res.status(e.status||502).json({error:String(e.message||e)})}});
+app.post('/api/admin/v95/engage',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v95Lab.engage()));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
