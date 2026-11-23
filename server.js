@@ -1603,6 +1603,9 @@ app.get('/api/admin/v104/safety',requireAdmin,(_req,res)=>res.set('Cache-Control
 // v10.5-v11.0: audit known IG write boundary, restart evidence and model-only recovery.
 const v110Boundary=require('./marketpulse-v110-boundary');
 app.get('/api/admin/v110/boundary',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v110Boundary.report({dataDir:DATA_DIR,bootAt:v100BootAt,legacy:v91Lab.report(),durable:v95Lab.report(),memoryMB:Math.round(process.memoryUsage().rss/1048576),storageHealthy:persistenceHealthy,readiness:v79Readiness()})));
+// v11.1-v12.0: on-demand, read-only verification with no additional timers or broker writes.
+const v120Verification=require('./marketpulse-v120-verification');
+app.get('/api/admin/v120/verification',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v120Verification.report({dataDir:DATA_DIR,bootAt:v100BootAt,legacy:v91Lab.report(),durable:v95Lab.report(),memoryMB:Math.round(process.memoryUsage().rss/1048576),storageHealthy:persistenceHealthy,freshFeeds:v79Readiness().markets.filter(x=>x.streamFresh).length,brokerBlocked:!BROKER_DEMO_EXECUTION})));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
