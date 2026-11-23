@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='8.4.0';
+const APP_VERSION='8.8.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1568,6 +1568,14 @@ const v84Workbench=require('./marketpulse-v84-workbench').createWorkbench({
  getStorage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy})
 });
 app.get('/api/admin/v84/workbench',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v84Workbench.report()));
+// v8.5-v8.8 combined: on-demand read-only evidence. No broker APIs, timers or execution changes.
+const v88Evidence=require('./marketpulse-v88-evidence').createEvidence({
+ dataDir:DATA_DIR,getShadow:()=>v80Shadow.status(),getReadiness:()=>v79Readiness(),
+ getMemory:()=>Math.round(process.memoryUsage().rss/1048576),
+ getStorage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy}),
+ getWorkbench:()=>v84Workbench.report()
+});
+app.get('/api/admin/v88/evidence',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v88Evidence.report()));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
