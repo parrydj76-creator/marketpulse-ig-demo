@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='7.8.0';
+const APP_VERSION='7.9.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1493,6 +1493,38 @@ const v77Shadow=require('./marketpulse-v77-shadow').createV77({
   candleFile:CANDLE_STATE_PATH
  })
 });
+
+// V7.9 read-only readiness cockpit. No broker writes, no automatic arming.
+const v79History=[];
+function v79Sample(){
+ const m=process.memoryUsage(),mb=x=>Math.round(x/1048576);
+ const snap={at:new Date().toISOString(),uptimeSeconds:Math.round(process.uptime()),rssMB:mb(m.rss),heapUsedMB:mb(m.heapUsed),externalMB:mb(m.external)};
+ v79History.push(snap);if(v79History.length>180)v79History.shift();return snap;
+}
+v79Sample();const v79Timer=setInterval(v79Sample,60000);v79Timer.unref();
+function v79Readiness(){
+ const now=Date.now();
+ const pairs=MAJOR_FOREX.map(m=>{
+  const q=quotes.get(m.epic),b=candles.get(m.epic)||[],sig=analyse(m.epic);
+  const age=q?Math.round((now-q.at)/1000):null;
+  const recent=b.slice(-30);
+  const consecutive=recent.length===30&&recent.every((bar,i)=>i===0||Date.parse(bar.time)-Date.parse(recent[i-1].time)===FIVE);
+  const fresh=!!q&&q.source==='STREAM'&&age>=0&&age<20;
+  return {epic:m.epic,name:m.name,streamFresh:fresh,ageSeconds:age,bars:b.length,missingBars:Math.max(0,30-b.length),consecutive30:consecutive,direction:sig.direction,score:sig.score,shadowReady:fresh&&consecutive&&sig.direction!=='WARMING'&&sig.direction!=='STALE'};
+ });
+ const mem=v79History.at(-1)||v79Sample();
+ const blockers=[];
+ if(!pairs.every(p=>p.streamFresh))blockers.push('STREAM_NOT_FRESH');
+ if(!pairs.every(p=>p.consecutive30))blockers.push('CANDLE_HISTORY_NOT_READY');
+ if(mem.rssMB>=450)blockers.push('MEMORY_PRESSURE');
+ if(!persistenceHealthy)blockers.push('PERSISTENCE_UNHEALTHY');
+ if(!PERSISTENT_STORAGE)blockers.push('DURABLE_STORAGE_NOT_CONFIRMED');
+ if(!brokerReconciled)blockers.push('BROKER_RECONCILIATION_NOT_READY');
+ blockers.push('GBP_RISK_CERTIFICATION_REQUIRED','BROKER_ORDER_LIFECYCLE_CERTIFICATION_REQUIRED','CRASH_RECOVERY_CERTIFICATION_REQUIRED','KILL_SWITCH_CERTIFICATION_REQUIRED','BROKER_EXECUTION_HARD_BLOCKED');
+ return {version:'7.9.0',at:new Date().toISOString(),mode:'READ_ONLY_UNATTENDED_READINESS',node:process.version,uptimeSeconds:Math.round(process.uptime()),streamStatus,marketCount:markets.size,markets:pairs,blockers,shadowEligibleCount:pairs.filter(p=>p.shadowReady).length,memory:{...mem,headroomTo512MB:512-mem.rssMB,history:v79History.slice(-120)},recovery:{persistenceHealthy,persistentConfigured:PERSISTENT_STORAGE,brokerReconciled,candleFileExists:fs.existsSync(CANDLE_STATE_PATH)},safety:{brokerOrdersAllowed:false,brokerExecutionHardBlocked:true,autoArmAllowed:false,unattendedExecutionCertified:false},note:'Read-only monitoring. No simulated performance guarantee; IG broker writes remain hard-blocked.'};
+}
+app.get('/api/admin/v79/readiness',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v79Readiness()));
+app.get('/api/admin/v79/health',requireAdmin,(_req,res)=>{const x=v79Readiness();res.set('Cache-Control','no-store').json({version:x.version,at:x.at,streamStatus:x.streamStatus,marketCount:x.marketCount,memory:x.memory,recovery:x.recovery,safety:x.safety,blockers:x.blockers});});
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
