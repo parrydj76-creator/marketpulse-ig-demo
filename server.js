@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[STARTUP_MEMORY]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576)}));
 }, 1000);
 startupMemoryTimer.unref();
-const APP_VERSION='7.5.0';
+const APP_VERSION='7.6.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1461,6 +1461,17 @@ console.log('[STARTUP_CHECKPOINT] before v270Readiness',Math.round(process.memor
 v270Readiness.routes(app);
 console.log('[STARTUP_CHECKPOINT] after v270Readiness',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v270Readiness.init().catch(e=>console.error('v270 init failed:',e.message));
+
+// v76: read-only multi-market readiness, bounded memory diagnostics, durable status transitions.
+const v76Readiness=require('./marketpulse-v76-readiness').createV76({
+ app,requireAdmin,dataDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ getState:()=>({
+  markets:MAJOR_FOREX.map(m=>({epic:m.epic,quote:quotes.get(m.epic),bars:candles.get(m.epic)||[],signal:analyse(m.epic)})),
+  persistenceHealthy,brokerReconciled,tradingConfigValid:tradingConfigValid(),
+  demoLifecycleVerified:DEMO_EXECUTION_TESTED,brokerExecutionEnabled:BROKER_DEMO_EXECUTION,
+  pendingOrder:!!trade.pendingOrder,operatorStop:trade.operatorStop
+ })
+});
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
