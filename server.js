@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='7.9.0';
+const APP_VERSION='8.0.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1525,6 +1525,18 @@ function v79Readiness(){
 }
 app.get('/api/admin/v79/readiness',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v79Readiness()));
 app.get('/api/admin/v79/health',requireAdmin,(_req,res)=>{const x=v79Readiness();res.set('Cache-Control','no-store').json({version:x.version,at:x.at,streamStatus:x.streamStatus,marketCount:x.marketCount,memory:x.memory,recovery:x.recovery,safety:x.safety,blockers:x.blockers});});
+
+// V8.0 isolated, durable shadow-only lifecycle. No IG broker callbacks are passed.
+const v80Shadow=require('./marketpulse-v80-shadow').createShadow80({
+ dataDir:DATA_DIR,epics:MAJOR_FOREX.map(x=>x.epic),storageConfirmed:PERSISTENT_STORAGE,
+ getSnapshot:()=>({memoryMB:Math.round(process.memoryUsage().rss/1048576),persistenceHealthy,
+  markets:MAJOR_FOREX.map(m=>{const q=quotes.get(m.epic),bars=candles.get(m.epic)||[],s=analyse(m.epic),last=bars.at(-1)?.time||null;
+   const recent=bars.slice(-30),consecutive30=recent.length===30&&recent.every((b,i)=>i===0||Date.parse(b.time)-Date.parse(recent[i-1].time)===FIVE);
+   return {epic:m.epic,bid:q?.bid,ask:q?.ask,lastBar:last,consecutive30,streamFresh:!!q&&q.source==='STREAM'&&q.marketState==='DEAL'&&String(q.delayed)==='0'&&Date.now()-q.at<15000,direction:s.direction,score:s.score};})})
+});
+const v80Timer=setInterval(()=>{try{v80Shadow.tick()}catch(e){log('V80 shadow tick: '+String(e.message).slice(0,120))}},30000);v80Timer.unref();
+app.get('/api/admin/v80/shadow',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v80Shadow.status()));
+app.get('/api/admin/v80/operations',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json({version:APP_VERSION,readiness:v79Readiness(),shadow:v80Shadow.status()}));
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
