@@ -1473,6 +1473,17 @@ const v76Readiness=require('./marketpulse-v76-readiness').createV76({
  })
 });
 
+// v77: read-only persistent shadow signals and memory/recovery diagnostics.
+// No IG write adapter, no simulated positions, no execution enablement.
+const v77Shadow=require('./marketpulse-v77-shadow').createV77({
+ app,requireAdmin,dataDir:DATA_DIR,persistentStorage:PERSISTENT_STORAGE,
+ getState:()=>({
+  markets:MAJOR_FOREX.map(m=>({epic:m.epic,quote:quotes.get(m.epic),bars:candles.get(m.epic)||[],signal:analyse(m.epic)})),
+  persistenceHealthy,brokerReconciled,brokerExecutionEnabled:BROKER_DEMO_EXECUTION,
+  candleFile:CANDLE_STATE_PATH
+ })
+});
+
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});

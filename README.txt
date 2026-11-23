@@ -1,11 +1,13 @@
-MarketPulse AI v76 read-only mega diagnostic upgrade
+MarketPulse v7.7.0 — passive shadow evidence + recovery diagnostics
 
-Upload BOTH server.js and marketpulse-v76-readiness.js to the ROOT of the same GitHub repository, then commit and deploy. Do not delete other files.
+Upload server.js and marketpulse-v77-shadow.js to the GitHub repository ROOT. KEEP the existing marketpulse-v76-readiness.js and all other modules.
 
 New endpoints:
-GET /api/v76/readiness - public readiness summary (no account identifiers)
-GET /api/v76/metrics - admin-token protected bounded historical metrics and state transitions
+GET /api/v77/readiness — public, no account identifiers
+GET /api/v77/diagnostics — ADMIN_TOKEN required via X-Admin-Token header
 
-This upgrade preserves existing endpoints and IG DEMO broker execution HARD_BLOCKED. It does not turn on paper trading or IG order placement. It adds seven-pair feed/candle readiness, memory RSS/heap monitoring, bounded diagnostics, persisted readiness transitions and safety blockers.
+Features: bounded RSS/heap trends; disk candle-file checks; read-only seven-market shadow signal eligibility; persistent bounded evidence on actionable signal transitions; restored journal status. Existing server.js already persists stream-candles.json and restores it on boot. This upgrade does not change that logic.
 
-Do not set IG broker execution flags or enable unattended broker trading. Render Free can sleep; use always-on hosting and independently verify recovery and risk sizing before considering broker execution.
+Important: no autonomous simulation, broker order placement or execution enabling. Shadow signals are not probabilities or trades. Do not enable broker execution. Render Free is not reliable always-on hosting.
+
+Deploy then inspect /api/health, /api/v76/readiness and /api/v77/readiness. Keep a copy of your current working server.js for rollback.
