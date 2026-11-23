@@ -5,6 +5,12 @@ const express=require('express'), path=require('path'), fs=require('fs');
 const {LightstreamerClient,Subscription}=require('lightstreamer-client-node');
 const {PaperEngine}=require('./paper-engine');
 const {summarizeFeed,feedFresh}=require('./feed-health');
+// Startup memory diagnostics (no broker execution changes).
+const startupMemoryTimer = setInterval(() => {
+  const m = process.memoryUsage();
+  console.log('[STARTUP_MEMORY]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576)}));
+}, 1000);
+startupMemoryTimer.unref();
 const APP_VERSION='7.5.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
@@ -1301,14 +1307,18 @@ const v170Certification=require('./v170-certification').createV170({requireAdmin
 v170Certification.routes(app);
 // v180 evidence workbench: PostgreSQL evidence intake and integrity; NO IG dealing.
 const v180Evidence=require('./v180-evidence-workbench').createV180({requireAdmin,pool:v125Pool,v170:v170Certification});
+console.log('[STARTUP_CHECKPOINT] before v180Evidence',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 v180Evidence.routes(app);
+console.log('[STARTUP_CHECKPOINT] after v180Evidence',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v180Evidence.init().catch(e=>console.error('v180 evidence schema init failed:',e.message));
 void v160Readiness.init().catch(e=>console.error('v160 rehearsal lease init failed:',e.message));
 
 // v190 authenticated read-only IG evidence and fenced operator preparation; NO broker writes.
 const v190BrokerEvidence=require('./v190-broker-evidence').createV190({requireAdmin,pool:v125Pool,
  readIG:(route,version)=>api(route,'GET',null,version)});
+console.log('[STARTUP_CHECKPOINT] before v190BrokerEvidence',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 v190BrokerEvidence.routes(app);
+console.log('[STARTUP_CHECKPOINT] after v190BrokerEvidence',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v190BrokerEvidence.init().catch(e=>console.error('v190 init failed:',e.message));
 
 // v192: read-only certification evidence workbench; no broker write callback.
@@ -1354,7 +1364,9 @@ void v198ReadinessLab.init().catch(e=>console.error('v198 init failed:',e.messag
 
 // v199-v203 consolidated readiness module: GET-only, no broker write adapter.
 const v203Combined=require('./v203-combined-readiness').createV203({requireAdmin,pool:v125Pool,readIG:(route,version)=>api(route,'GET',null,version),v198:v198ReadinessLab});
+console.log('[STARTUP_CHECKPOINT] before v203Combined',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 v203Combined.routes(app);
+console.log('[STARTUP_CHECKPOINT] after v203Combined',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v203Combined.init().catch(e=>console.error('v203 init failed:',e.message));
 
 // v205-v208: evidence-only certification checks; register before dashboard fallback.
@@ -1371,7 +1383,9 @@ void v213Controlled.init().catch(e=>console.error('v213 init failed:',e.message)
 // v214-v220: durable preflight, read-only IG reconciliation, recovery rehearsal; no broker writes.
 const v220Preflight=require('./v220-execution-preflight').createV220({requireAdmin,pool:v125Pool,
  readIG:(route,version)=>api(route,'GET',null,version),v213:v213Controlled});
+console.log('[STARTUP_CHECKPOINT] before v220Preflight',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 v220Preflight.routes(app);
+console.log('[STARTUP_CHECKPOINT] after v220Preflight',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v220Preflight.init().catch(e=>console.error('v220 init failed:',e.message));
 
 // v221-v227: GET-only IG certification lab. No broker write callback is supplied.
@@ -1407,7 +1421,9 @@ void v255Workbench.init().catch(e=>console.error('v255 init failed:',e.message))
 // v256-v270: fail-closed unattended shadow readiness. No IG write adapter.
 const v270Readiness=require('./v270-unattended-readiness').createV270({requireAdmin,pool:v125Pool,
  readIG:(route,version)=>api(route,'GET',null,version)});
+console.log('[STARTUP_CHECKPOINT] before v270Readiness',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 v270Readiness.routes(app);
+console.log('[STARTUP_CHECKPOINT] after v270Readiness',Math.round(process.memoryUsage().heapUsed/1048576)+'MB');
 void v270Readiness.init().catch(e=>console.error('v270 init failed:',e.message));
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
