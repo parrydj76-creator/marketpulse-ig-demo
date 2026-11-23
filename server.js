@@ -8,8 +8,8 @@ const {summarizeFeed,feedFresh}=require('./feed-health');
 // Startup memory diagnostics (no broker execution changes).
 const startupMemoryTimer = setInterval(() => {
   const m = process.memoryUsage();
-  console.log('[STARTUP_MEMORY]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576)}));
-}, 1000);
+  console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
+}, 60000);
 startupMemoryTimer.unref();
 const APP_VERSION='7.6.0';
 const {PaperArchiver}=require('./paper-archiver');
@@ -453,6 +453,16 @@ async function tradingCycle(){if(trade.pendingOrder)return;if(!BROKER_DEMO_EXECU
 
 async function init(){if(starting)return;starting=true;brokerReconciled=false;disarm('Reconnect requires re-arming');try{closeStream();await login();await discover();await refreshAccount();const brokerPositions=await reconcilePositions();brokerReconciled=true;if(brokerPositions.length||trade.tracked)log('Broker reconciliation: '+brokerPositions.length+' open position(s), bot tracked='+Boolean(trade.tracked));await checkRestSnapshot();startStream();startRestPolling()}catch(e){streamStatus='error';streamError=e.message;log('Startup: '+e.message)}finally{starting=false}}
 function requireAdmin(req,res,next){const token=process.env.ADMIN_TOKEN;if(!token)return res.status(503).json({error:'Set ADMIN_TOKEN in Render'});const supplied=req.get('X-Admin-Token')||'';const crypto=require('crypto');const a=Buffer.from(supplied),b=Buffer.from(token);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(403).json({error:'Invalid admin token'});next()}
+// V7.8: on-demand memory diagnostics; no timers, heap snapshots or broker writes.
+app.get('/api/admin/v78/memory',requireAdmin,(_req,res)=>{
+ const m=process.memoryUsage(),MB=1048576;
+ const bytesToMB=n=>Math.round(n/MB);
+ res.set('Cache-Control','no-store').json({version:'7.8.0',at:new Date().toISOString(),uptimeSeconds:Math.round(process.uptime()),node:process.version,
+  memory:{rssMB:bytesToMB(m.rss),heapUsedMB:bytesToMB(m.heapUsed),heapTotalMB:bytesToMB(m.heapTotal),externalMB:bytesToMB(m.external),arrayBuffersMB:bytesToMB(m.arrayBuffers||0),headroomTo512MB:512-bytesToMB(m.rss)},
+  counts:{markets:markets.size,quotes:quotes.size,signals:signals.size,candleMarkets:candles.size,completedCandles:[...candles.values()].reduce((n,b)=>n+b.length,0),subscriptions:sub?.length||0,diagnostics:diagnostics.size,events:events.length},
+  safeguards:{brokerExecutionHardBlocked:!BROKER_DEMO_EXECUTION,brokerOrdersAllowed:false},
+  note:'Diagnostic snapshot only; no garbage collection triggered. RSS includes native and external allocations.'});
+});
 app.get('/api/paper/analytics',async(_req,res)=>{
  try{
   const {calculatePaperAnalytics}=require('./paper-analytics');
