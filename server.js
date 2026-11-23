@@ -1592,6 +1592,10 @@ const v95Lab=require('./marketpulse-v95-safety').createLab({dataDir:DATA_DIR,rea
 app.get('/api/admin/v95/lab',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v95Lab.report()));
 app.post('/api/admin/v95/inspect',requireAdmin,async(_req,res)=>{try{res.set('Cache-Control','no-store').json(await v95Lab.inspect())}catch(e){res.status(e.status||502).json({error:String(e.message||e)})}});
 app.post('/api/admin/v95/engage',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v95Lab.engage()));
+// v10: on-demand consolidated evidence only; zero IG write calls and no background timers.
+const v100Audit=require('./marketpulse-v100-safety-audit');
+const v100BootAt=new Date().toISOString();
+app.get('/api/admin/v100/safety',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v100Audit.assess({dataDir:DATA_DIR,oldLab:v91Lab.report(),newLab:v95Lab.report(),readiness:v79Readiness(),memory:Math.round(process.memoryUsage().rss/1048576),storage:{healthy:persistenceHealthy},brokerExecutionEnabled:BROKER_DEMO_EXECUTION,bootAt:v100BootAt})));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
