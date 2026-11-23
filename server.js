@@ -1596,6 +1596,9 @@ app.post('/api/admin/v95/engage',requireAdmin,(_req,res)=>res.set('Cache-Control
 const v100Audit=require('./marketpulse-v100-safety-audit');
 const v100BootAt=new Date().toISOString();
 app.get('/api/admin/v100/safety',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v100Audit.assess({dataDir:DATA_DIR,oldLab:v91Lab.report(),newLab:v95Lab.report(),readiness:v79Readiness(),memory:Math.round(process.memoryUsage().rss/1048576),storage:{healthy:persistenceHealthy},brokerExecutionEnabled:BROKER_DEMO_EXECUTION,bootAt:v100BootAt})));
+// v10.1-v10.4: read-only combined safety/restart evidence, no broker write operations.
+const v104Lab=require('./marketpulse-v104-safety-lab').createLab({dataDir:DATA_DIR,getLegacy:()=>v91Lab.report(),getDurable:()=>v95Lab.report(),getMemory:()=>Math.round(process.memoryUsage().rss/1048576),getStorage:()=>({healthy:persistenceHealthy}),getReadiness:()=>v79Readiness(),bootAt:v100BootAt});
+app.get('/api/admin/v104/safety',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v104Lab.report()));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
