@@ -1,0 +1,8 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');const {assess}=require('../marketpulse-v100-safety-audit');
+function setup(){const d=fs.mkdtempSync(path.join(os.tmpdir(),'v100-'));fs.writeFileSync(path.join(d,'v95-kill-latch.json'),JSON.stringify({active:true,revision:2}));return d}
+function run(d,opts={}){return assess({dataDir:d,oldLab:{killSwitch:{active:true,persisted:true}},newLab:{latch:{active:true,persisted:true,revision:2}},readiness:{markets:Array.from({length:7},()=>({streamFresh:true}))},memory:430,storage:{healthy:true},...opts})}
+test('matching disk revision is observable but does not authorize broker orders',()=>{const d=setup(),r=run(d);assert.equal(r.failClosed,false);assert.equal(r.brokerOrdersAllowed,false);fs.rmSync(d,{recursive:true,force:true})});
+test('legacy latch disagreement fails closed',()=>{const d=setup(),r=run(d,{oldLab:{killSwitch:{active:true,persisted:false}}});assert.equal(r.failClosed,true);assert.ok(r.issues.includes('LATCH_STATUS_CONFLICT'));fs.rmSync(d,{recursive:true,force:true})});
+test('disk revision mismatch fails closed',()=>{const d=setup(),r=run(d,{newLab:{latch:{active:true,persisted:true,revision:3}}});assert.equal(r.failClosed,true);fs.rmSync(d,{recursive:true,force:true})});
+test('memory threshold fails closed',()=>{const d=setup(),r=run(d,{memory:450});assert.equal(r.failClosed,true);fs.rmSync(d,{recursive:true,force:true})});
+test('absent file fails closed',()=>{const d=setup();fs.unlinkSync(path.join(d,'v95-kill-latch.json'));assert.equal(run(d).failClosed,true);fs.rmSync(d,{recursive:true,force:true})});
