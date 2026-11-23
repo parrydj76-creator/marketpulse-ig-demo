@@ -11,7 +11,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='8.2.0';
+const APP_VERSION='8.3.0';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -1555,6 +1555,12 @@ const v82Audit=require('./marketpulse-v82-audit').createAudit({
  getMemory:()=>Math.round(process.memoryUsage().rss/1048576)
 });
 app.get('/api/admin/v82/audit',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v82Audit.report()));
+// V8.3: read-only shadow journal evidence, retained-window metrics and restart certification.
+const v83Certification=require('./marketpulse-v83-certification').createCertification({
+ dataDir:DATA_DIR,getShadow:()=>v80Shadow.status(),getReadiness:()=>v79Readiness(),
+ getMemory:()=>Math.round(process.memoryUsage().rss/1048576)
+});
+app.get('/api/admin/v83/certification',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v83Certification.report()));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
