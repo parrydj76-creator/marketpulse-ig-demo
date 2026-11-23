@@ -163,6 +163,7 @@ let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',la
 function log(msg){events.unshift({time:new Date().toISOString(),message:String(msg).slice(0,300)});events.length=Math.min(events.length,100);console.log('[MarketPulse]',msg)}
 function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null}
 async function request(url,method='GET',body=null,version='1'){
+ if(!require('./marketpulse-v110-boundary').allowIGRequest(method,url))throw Error('V110_IG_DEALING_TRANSPORT_BLOCKED');
  if(!require('./v54-safety').allowIGRequest(method,url))throw Error('V54_BROKER_WRITE_HARD_BLOCKED');
  const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',VERSION:version,Accept:'application/json'};
  if(auth){headers.CST=auth.cst;headers['X-SECURITY-TOKEN']=auth.xst}
@@ -404,7 +405,7 @@ async function openDemo(direction,{manualTest=false}={}){throw Error('Monetary r
 async function closeDemo(reason){if(!trade.tracked)return;const pos=trade.tracked;const payload={dealId:pos.dealId,direction:pos.direction==='BUY'?'SELL':'BUY',orderType:'MARKET',size:pos.size};
  // IG documented close route uses POST + _method: DELETE header, VERSION:1.
  const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',CST:auth.cst,'X-SECURITY-TOKEN':auth.xst,VERSION:'1','Content-Type':'application/json',Accept:'application/json','_method':'DELETE'};
- trade.pendingOrder={kind:'CLOSE',dealId:pos.dealId,createdAt:new Date().toISOString(),status:'SUBMISSION_UNKNOWN'};saveTrade();if(!persistenceHealthy)throw Error('Durable trade-state write failed');const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data={}}if(!response.ok||data.errorCode)throw Error('IG close failed: '+response.status+' '+(data.errorCode||raw.slice(0,100)));
+ trade.pendingOrder={kind:'CLOSE',dealId:pos.dealId,createdAt:new Date().toISOString(),status:'SUBMISSION_UNKNOWN'};saveTrade();if(!persistenceHealthy)throw Error('Durable trade-state write failed');require('./marketpulse-v110-boundary').assertNoBrokerWrite('POST','/positions/otc');const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data={}}if(!response.ok||data.errorCode)throw Error('IG close failed: '+response.status+' '+(data.errorCode||raw.slice(0,100)));
  const conf=await confirmDeal(data.dealReference);recordTrade('CLOSE_CONFIRMED',{dealId:pos.dealId,reason,confirmation:conf.dealStatus});trade.tracked=null;trade.lastClosedAt=Date.now();saveTrade();if(!persistenceHealthy)throw Error('Cannot persist confirmed close');trade.pendingOrder=null;saveTrade();return conf}
 
 // Manual broker lifecycle tests do not need EMA/RSI warm-up. Automatic trading still does.
@@ -1110,7 +1111,7 @@ const v66Dealing=require('./v66-dealing').createV66({
    'X-IG-API-KEY':process.env.IG_API_KEY||'',CST:auth.cst,
    'X-SECURITY-TOKEN':auth.xst,VERSION:'1','Content-Type':'application/json',
    Accept:'application/json','_method':'DELETE'};
-   const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,
+   require('./marketpulse-v110-boundary').assertNoBrokerWrite('POST','/positions/otc');const response=await fetch(HOST+'/positions/otc',{method:'POST',headers,
       body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)});
    const raw=await response.text();let data;try{data=JSON.parse(raw)}catch{data={}};
    if(!response.ok||data.errorCode)throw Error('IG_CLOSE_FAILED');return data;}
@@ -1599,6 +1600,9 @@ app.get('/api/admin/v100/safety',requireAdmin,(_req,res)=>res.set('Cache-Control
 // v10.1-v10.4: read-only combined safety/restart evidence, no broker write operations.
 const v104Lab=require('./marketpulse-v104-safety-lab').createLab({dataDir:DATA_DIR,getLegacy:()=>v91Lab.report(),getDurable:()=>v95Lab.report(),getMemory:()=>Math.round(process.memoryUsage().rss/1048576),getStorage:()=>({healthy:persistenceHealthy}),getReadiness:()=>v79Readiness(),bootAt:v100BootAt});
 app.get('/api/admin/v104/safety',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v104Lab.report()));
+// v10.5-v11.0: audit known IG write boundary, restart evidence and model-only recovery.
+const v110Boundary=require('./marketpulse-v110-boundary');
+app.get('/api/admin/v110/boundary',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v110Boundary.report({dataDir:DATA_DIR,bootAt:v100BootAt,legacy:v91Lab.report(),durable:v95Lab.report(),memoryMB:Math.round(process.memoryUsage().rss/1048576),storageHealthy:persistenceHealthy,readiness:v79Readiness()})));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
