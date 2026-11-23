@@ -1537,6 +1537,13 @@ const v80Shadow=require('./marketpulse-v80-shadow').createShadow80({
 const v80Timer=setInterval(()=>{try{v80Shadow.tick()}catch(e){log('V80 shadow tick: '+String(e.message).slice(0,120))}},30000);v80Timer.unref();
 app.get('/api/admin/v80/shadow',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(v80Shadow.status()));
 app.get('/api/admin/v80/operations',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json({version:APP_VERSION,readiness:v79Readiness(),shadow:v80Shadow.status()}));
+// V8.1: on-demand read-only root-cause diagnostics; no extra timers or broker access.
+const v81Integrity=require('./marketpulse-v81-integrity');
+app.get('/api/admin/v81/integrity',requireAdmin,(_req,res)=>{
+ const now=Date.now(),memoryMB=Math.round(process.memoryUsage().rss/1048576);
+ const report=v81Integrity.inspectAll({now,memoryMB,markets:MAJOR_FOREX.map(m=>({epic:m.epic,bars:candles.get(m.epic)||[],quote:quotes.get(m.epic)||null,signal:analyse(m.epic)}))});
+ res.set('Cache-Control','no-store').json({...report,memoryMB,storage:{persistentConfigured:PERSISTENT_STORAGE,persistenceHealthy,candleFileExists:fs.existsSync(CANDLE_STATE_PATH)},shadow:v80Shadow.status()});
+});
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
