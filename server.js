@@ -71,7 +71,43 @@ if(BROKER_DEMO_EXECUTION && process.env.RENDER==='true' && !process.env.RENDER_D
 // Atomic single-instance directory lock; held until process exit.
 const LOCK_DIR=path.join(DATA_DIR,'.marketpulse-instance-lock');
 let lockHeld=false;
-function acquireLocalLock(){if(!PERSISTENT_STORAGE)return;fs.mkdirSync(DATA_DIR,{recursive:true});try{fs.mkdirSync(LOCK_DIR);lockHeld=true;fs.writeFileSync(path.join(LOCK_DIR,'pid'),String(process.pid))}catch(e){throw Error('Another MarketPulse instance may be running, or a stale lock exists. Inspect '+LOCK_DIR+' before manually removing it: '+e.message)}}
+function acquireLocalLock(){
+ if(!PERSISTENT_STORAGE)return;
+ fs.mkdirSync(DATA_DIR,{recursive:true});
+ function createLock(){
+  fs.mkdirSync(LOCK_DIR); // Atomic creation: only one process can succeed.
+  lockHeld=true;
+  try{fs.writeFileSync(path.join(LOCK_DIR,'pid'),String(process.pid),{flag:'wx'});}
+  catch(e){releaseLocalLock();throw e;}
+ }
+ try{createLock();return;}catch(e){if(e.code!=='EEXIST')throw e;}
+ // Fail closed unless we can prove the old PID no longer exists.
+ let previousPid;
+ try{
+  const raw=fs.readFileSync(path.join(LOCK_DIR,'pid'),'utf8').trim();
+  if(!/^[1-9]\d*$/.test(raw))throw Error('invalid lock PID');
+  previousPid=Number(raw);
+  if(!Number.isSafeInteger(previousPid))throw Error('invalid lock PID');
+ }catch(e){throw Error('Instance lock exists but cannot be safely verified: '+e.message);}
+ try{
+  process.kill(previousPid,0);
+  throw Error('Instance lock belongs to a running process (PID '+previousPid+'); refusing duplicate startup');
+ }catch(e){
+  if(e.code!=='ESRCH')throw e; // EPERM and other unknown outcomes are unsafe.
+ }
+ // Only recover a lock whose recorded process is confirmed absent.
+ // Persistent disks must not be shared across hosts; PID checks are host-local.
+ if(process.env.RENDER_DISK_MOUNT_PATH && !LOCK_DIR.startsWith(process.env.RENDER_DISK_MOUNT_PATH+path.sep)){
+  throw Error('Lock path is outside the configured persistent disk; refusing automatic recovery');
+ }
+ const stalePath=LOCK_DIR+'.stale-'+process.pid;
+ try{
+  fs.renameSync(LOCK_DIR,stalePath);
+  fs.rmSync(stalePath,{recursive:true,force:true});
+  console.log('[STARTUP_LOCK] Recovered stale lock for exited PID '+previousPid);
+  createLock();
+ }catch(e){throw Error('Stale lock recovery failed; refusing startup: '+e.message);}
+}
 function releaseLocalLock(){if(lockHeld){try{fs.rmSync(LOCK_DIR,{recursive:true,force:true})}catch{}lockHeld=false}}
 process.once('exit',releaseLocalLock);
 process.once('SIGINT',()=>{releaseLocalLock();process.exit(0)});
