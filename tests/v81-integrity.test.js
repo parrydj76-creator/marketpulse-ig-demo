@@ -1,0 +1,11 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {inspectMarket}=require('../marketpulse-v81-integrity');
+const now=Date.parse('2026-11-23T12:00:00Z'),FIVE=300000;
+const bars=Array.from({length:30},(_,i)=>({time:new Date(now-30*FIVE+i*FIVE).toISOString(),close:1.1,ticks:3}));
+const quote={source:'STREAM',at:now-1000,marketState:'DEAL',delayed:'0'};
+test('30 consecutive bars pass',()=>{const x=inspectMarket({epic:'x',bars,quote,now,signal:{direction:'WAIT'}});assert.equal(x.consecutive30,true);assert.equal(x.firstGap,null);});
+test('gap detected despite 30 bars',()=>{const b=bars.map(x=>({...x}));b[12].time=new Date(Date.parse(b[12].time)+FIVE).toISOString();const x=inspectMarket({epic:'x',bars:b,quote,now});assert.equal(x.consecutive30,false);assert.ok(x.issues.includes('NON_CONSECUTIVE_BARS'));});
+test('memory gate explicit',()=>{const x=inspectMarket({epic:'x',bars,quote,now,memoryMB:450});assert.ok(x.issues.includes('MEMORY_GATE_450MB'));});
+test('unknown delay blocks quote eligibility',()=>{const x=inspectMarket({epic:'x',bars,quote:{...quote,delayed:null},now});assert.ok(x.issues.includes('DELAY_NOT_EXPLICITLY_ZERO'));});
+test('stale bar detected',()=>{const x=inspectMarket({epic:'x',bars,quote,now:now+3600000});assert.ok(x.issues.includes('LAST_BAR_STALE_OR_INVALID'));});
