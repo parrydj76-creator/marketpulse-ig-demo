@@ -11,9 +11,11 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='15.0.0';
+const APP_VERSION='20.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
-const LEGACY_MINI_BACKGROUND=process.env.MP_LEGACY_MINI_BACKGROUND==='true';
+const LEGACY_MINI_BACKGROUND=false;
+const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
+const v200=require('./marketpulse-v200-core');
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -165,6 +167,7 @@ let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',la
 function log(msg){events.unshift({time:new Date().toISOString(),message:String(msg).slice(0,300)});events.length=Math.min(events.length,100);console.log('[MarketPulse]',msg)}
 function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null}
 async function request(url,method='GET',body=null,version='1'){
+ if(method!=='GET'&&!(method==='POST'&&url==='/session')&&!v200.gate(DATA_DIR).brokerOrdersAllowed)throw Error('V200_AUTHORITATIVE_GATE_BLOCKED');
  if(!require('./marketpulse-v110-boundary').allowIGRequest(method,url))throw Error('V110_IG_DEALING_TRANSPORT_BLOCKED');
  if(!require('./v54-safety').allowIGRequest(method,url))throw Error('V54_BROKER_WRITE_HARD_BLOCKED');
  const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',VERSION:version,Accept:'application/json'};
@@ -657,7 +660,7 @@ app.post('/api/admin/multi/arm',requireAdmin,async(req,res)=>{try{if(!multi)thro
 app.post('/api/admin/multi/stop',requireAdmin,(_req,res)=>res.json(multi?multi.stop():{error:'Multi mode disabled'}));
 app.post('/api/admin/multi/reset-stop',requireAdmin,async(req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json(await multi.resetOperatorStop(req.body?.confirm))}catch(e){res.status(409).json({error:e.message})}});
 app.post('/api/admin/multi/reconcile',requireAdmin,async(_req,res)=>{if(!multi)return res.status(409).json({error:'Multi mode disabled'});try{res.json({positions:await multi.reconcile(),status:multi.status()})}catch(e){res.status(502).json({error:e.message})}});
-setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
+if(LEGACY_PAPER_BACKGROUND)setInterval(()=>{if(multi)multi.tick().catch(e=>log('V6 tick error: '+e.message))},30000);
 app.get('/analytics',(_req,res)=>res.sendFile(path.join(__dirname,'public','analytics.html')));
 // V8: Register the background-push API before the dashboard fallback.
 const pushAlerts=createPushAlerts();
@@ -702,7 +705,7 @@ const v17Lab=legacyRequire('./v17-readiness').createV17({requireAdmin,signalSnap
 }});
 v17Lab.routes(app);
 void v17Lab.init().catch(e=>console.error('[V17]',e.message));
-setInterval(()=>{void v17Lab.tick().catch(e=>console.error('[V17 tick]',e.message))},30000);
+if(LEGACY_PAPER_BACKGROUND)setInterval(()=>{void v17Lab.tick().catch(e=>console.error('[V17 tick]',e.message))},30000);
 // V18 read-only broker readiness; never authorizes or sends IG orders.
 const v18Lab=legacyRequire('./v18-demo-readiness').createV18({requireAdmin,v17Lab,signalSnapshot:()=>{
  const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),a=analyse(epic),bars=candles.get(epic)||[];
@@ -746,7 +749,7 @@ const v25Autonomy=legacyRequire('./v25-autonomy').createV25({requireAdmin,signal
   delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null};
 }});
 v25Autonomy.routes(app);
-setInterval(()=>{v25Autonomy.tick((()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null}})())},15000);
+if(LEGACY_PAPER_BACKGROUND)setInterval(()=>{v25Autonomy.tick((()=>{const epic='CS.D.EURUSD.CFD.IP',q=quotes.get(epic),s=analyse(epic),bars=candles.get(epic)||[];return {epic,direction:s.direction,score:s.score,bar:bars.at(-1)?.time||null,quoteSource:q?.source||null,quoteAgeMs:q?Date.now()-q.at:null,marketState:q?.marketState||null,delayed:q?.delayed==null?null:String(q.delayed)==='0'?false:true,bid:q?.bid??null,ask:q?.ask??null}})())},15000);
 // V26 integrated diagnostics; broker execution remains hard-blocked in this module.
 const v26Readiness=legacyRequire('./v26-readiness').createV26({requireAdmin,
  simulation:()=>v25Autonomy.status(),
@@ -1615,18 +1618,20 @@ app.get('/api/admin/v130/readiness',requireAdmin,(_req,res)=>{try{
  result.recoveryCases=v130Readiness.recoveryCases();
  res.set('Cache-Control','no-store').json(result);
 }catch(e){res.status(503).json({error:'V130_READINESS_AUDIT_FAILED',message:String(e.message).slice(0,160),brokerOrdersAllowed:false})}});
+app.get('/api/admin/v200/core',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json({version:APP_VERSION,safety:v200.gate(DATA_DIR),legacyPaperBackground:LEGACY_PAPER_BACKGROUND,memoryMB:Math.round(process.memoryUsage().rss/1048576),brokerOrdersAllowed:false}));
+app.post('/api/admin/v200/recovery-test',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json(v200.recoveryTest(DATA_DIR))}catch(e){res.status(503).json({error:'LOCAL_RECOVERY_TEST_FAILED'})}});
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreRisk();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch(e){persistenceHealthy=false;log('Storage health failed: '+e.message)}log('V5.9 Render Free IG DEMO experimental started; execution '+(BROKER_DEMO_EXECUTION?'enabled by configuration':'disabled'));void recoverPaperOnStartup().catch(e=>log('Paper recovery startup error: '+e.message));init()});
 // Evaluate signals independently of REST polling. Never overlap trading cycles.
 // V9 paper-only evaluation; independent of legacy paper recovery and broker execution.
-setInterval(()=>{
+if(LEGACY_PAPER_BACKGROUND)setInterval(()=>{
   const epic='CS.D.EURUSD.CFD.IP';
   v9Paper.tick(quotes.get(epic),analyse(epic),candles.get(epic)||[]).catch(e=>log('V9 paper tick: '+e.message));
 },15000);
 
 let paperCycleBusy=false;
-setInterval(async()=>{
+if(LEGACY_PAPER_BACKGROUND)setInterval(async()=>{
   if(!paperRecoveryReady || paperCycleBusy)return;
   paperCycleBusy=true;
   try{
