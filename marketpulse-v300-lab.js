@@ -1,0 +1,21 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {inspectContract}=require('./marketpulse-v250-lab');
+const positive=x=>typeof x!=='boolean'&&x!==null&&x!==''&&Number.isFinite(Number(x))&&Number(x)>0;
+function estimate(contract,quote,fx,size,stop,cap){
+ if(![contract.valueOfOnePip,size,stop,cap].every(positive))throw Error('INVALID_RISK_INPUT');
+ if(!fx||!positive(fx.bid)||!positive(fx.ask)||fx.ask<fx.bid||fx.delay!==0||!Number.isFinite(fx.received)||Date.now()-fx.received>60000||fx.received>Date.now())throw Error('FX_UNAVAILABLE');
+ const gbp=Number(contract.valueOfOnePip)/fx.bid;const risk=gbp*size*stop;
+ return {quote,indicativeGBPPerPip:gbp,indicativeRiskGBP:risk,withinIllustrativeCap:risk<=cap,reportedMinimumDealSize:contract.minimumDealSize,reportedMinimumStop:contract.minimumStop,dealUnitsCertified:false,stopUnitsCertified:false,executable:false,note:'Assumes reported pip value is quote currency per size 1; excludes slippage and fees. Receipt time is not exchange timestamp.'};
+}
+function normalize(r){if(!Array.isArray(r.positions)||r.positions.length>100)throw Error('INVALID_POSITION_RESPONSE');const rows=r.positions.map(x=>{const p=x.position||{},m=x.market||{};if(typeof p.dealId!=='string'||!p.dealId||typeof m.epic!=='string'||!positive(p.size)||!['BUY','SELL'].includes(p.direction))throw Error('INVALID_POSITION');return {id:p.dealId,epic:m.epic,size:Number(p.size),direction:p.direction,stop:p.stopLevel??null,limit:p.limitLevel??null}}).sort((a,b)=>a.id.localeCompare(b.id));if(new Set(rows.map(x=>x.id)).size!==rows.length)throw Error('DUPLICATE_POSITION');return rows;}
+function compare(before,after){const a=new Map(before.map(x=>[x.id,x])),b=new Map(after.map(x=>[x.id,x]));return {appeared:after.filter(x=>!a.has(x.id)),disappeared:before.filter(x=>!b.has(x.id)),changed:after.filter(x=>a.has(x.id)&&JSON.stringify(a.get(x.id))!==JSON.stringify(x))};}
+function create({dir,readIG,epics,gate,storage}){const file=path.join(dir,'v300-broker-evidence.json'),boot=crypto.randomUUID();let busy=false;
+ function load(){try{if(fs.statSync(file).size>500000)throw Error('EVIDENCE_TOO_LARGE');const x=JSON.parse(fs.readFileSync(file,'utf8'));if(!Array.isArray(x.snapshots)||x.snapshots.length>20)throw Error('INVALID_EVIDENCE');return x}catch(e){if(e.code==='ENOENT')return {snapshots:[]};throw e}}
+ function save(x){const tmp=file+'.'+crypto.randomUUID();let fd;try{fd=fs.openSync(tmp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(x));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(tmp,file);const d=fs.openSync(dir,'r');try{fs.fsyncSync(d)}finally{fs.closeSync(d)}}finally{if(fd!==undefined)fs.closeSync(fd);try{fs.unlinkSync(tmp)}catch{}}}
+ function status(){return {version:'30.0.0',boot,safety:gate(),storage:storage(),brokerOrdersAllowed:false,certification:false,evidence:load().snapshots,blockers:['DEAL_UNITS_UNVERIFIED','STOP_UNITS_UNVERIFIED','BROKER_LIFECYCLE_UNVERIFIED','BROKER_CRASH_RECOVERY_UNVERIFIED','BROKER_KILL_SWITCH_UNVERIFIED']}}
+ async function exclusive(fn){if(busy)throw Error('INSPECTION_BUSY');busy=true;try{return await fn()}finally{busy=false}}
+ async function snapshot(){return exclusive(async()=>{const s=storage();if(!s.configured||!s.healthy)throw Error('STORAGE_NOT_CONFIRMED');const x=load(),rows=normalize(await readIG('/positions','2')),previous=x.snapshots.at(-1);const record={boot,at:new Date().toISOString(),rows,difference:previous?compare(previous.rows,rows):null,previousBoot:previous?.boot??null};x.snapshots.push(record);x.snapshots=x.snapshots.slice(-20);save(x);return {record,readbackVerified:JSON.stringify(load())===JSON.stringify(x),brokerCertified:false}})}
+ async function risk({epic,size,stop,cap}){return exclusive(async()=>{if(!epics.has(epic))throw Error('INVALID_EPIC');const quote=epic.split('.')[2].slice(3);const c=inspectContract(await readIG('/markets/'+epic,'3'));const f=(await readIG('/markets/CS.D.GBP'+quote+'.CFD.IP','3')).snapshot||{};return estimate(c,quote,{bid:Number(f.bid),ask:Number(f.offer),delay:f.delayTime,received:Date.now()},size,stop,cap)})}
+ return {status,snapshot,risk};}
+module.exports={estimate,normalize,compare,create};
