@@ -1,0 +1,5 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');const lab=require('../marketpulse-v250-lab');
+test('abrupt child exit preserves unknown and blocks duplicate',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mp25-'));try{assert.deepEqual(lab.crashTest(dir),{childKilled:true,restoredUnknown:true,duplicateBlocked:true,finalState:'RECONCILED',brokerTested:false})}finally{fs.rmSync(dir,{recursive:true,force:true})}});
+test('contract evidence cannot certify',()=>{assert.equal(lab.inspectContract({instrument:{contractSize:100000}}).certified,false)});
+test('missing contract fields remain null',()=>{assert.equal(lab.inspectContract({}).minimumStop,null)});
+test('legacy bundle and direct fetch removed from entrypoint',()=>{const s=fs.readFileSync(path.join(__dirname,'../server.js'),'utf8');assert.ok(!s.includes('legacy-bundle').valueOf() || !s.includes("require('./legacy-bundle')"));assert.ok(!/\bfetch\(/.test(s));assert.ok(!s.includes('createV9Paper'))});
