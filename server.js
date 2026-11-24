@@ -9,7 +9,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='50.0.0';
+const APP_VERSION='90.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
 const LEGACY_MINI_BACKGROUND=false;
 const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
@@ -444,6 +444,8 @@ const paper50=require('./marketpulse-v500-paper').create({dir:DATA_DIR,snapshot:
 app.get('/api/admin/v500/status',requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(paper50.status()));
 app.post('/api/admin/v500/control',requireAdmin,(req,res)=>{try{res.json(paper50.enable(req.body?.enabled))}catch(e){res.status(409).json({error:e.message})}});
 setInterval(()=>{try{paper50.tick()}catch(e){log('Paper50: '+e.message)}},5000).unref();
+const lab90=require('./marketpulse-v900-lab').create({dir:DATA_DIR,readIG:(route,version)=>api(route,'GET',null,version),epics:MAJOR_EPICS,storage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy&&lockHeld}),gate:()=>v200.gate(DATA_DIR),normalize:require('./marketpulse-v300-lab').normalize});
+for(const [method,route,fn] of [['get','status',()=>lab90.status()],['post','capture',()=>lab90.capture()],['post','contract',req=>lab90.contract(req.body?.epic)]])app[method]('/api/admin/v900/'+route,requireAdmin,async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req))}catch(e){res.status(409).json({error:'V90_INSPECTION_FAILED',detail:String(e.message).slice(0,160)})}});
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch{persistenceHealthy=false}void init()});
 setInterval(()=>{if(!starting)refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;void init()}},30000);
