@@ -9,7 +9,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='350.0.0';
+const APP_VERSION='500.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
 const LEGACY_MINI_BACKGROUND=false;
 const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
@@ -452,6 +452,8 @@ const v2500=require('./marketpulse-v2500');
 const evidence250=v2500.create({dir:DATA_DIR,readIG:(route,version)=>api(route,'GET',null,version),storage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy&&lockHeld}),gate:()=>v200.gate(DATA_DIR),normalize:require('./marketpulse-v300-lab').normalize});
 app.get('/api/admin/v2500/status',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json({...v2500.report({paper:paper50.status(),broker:lab90.status(),safety:v200.gate(DATA_DIR)}),confirmations:evidence250.status()})}catch(e){res.status(409).json({error:'EVIDENCE_UNAVAILABLE'})}});
 app.post('/api/admin/v2500/capture',requireAdmin,async(req,res)=>{try{res.set('Cache-Control','no-store').json(await evidence250.capture(req.body?.reference))}catch(e){res.status(409).json({error:'CAPTURE_FAILED',detail:String(e.message).slice(0,120)})}});
+const suite500=require('./marketpulse-v5000').create({dir:DATA_DIR,readIG:(route,version)=>api(route,'GET',null,version),contract:epic=>lab90.contract(epic),inputs:()=>({paper:paper50.status(),broker:lab90.status(),confirmations:evidence250.status(),safety:v200.gate(DATA_DIR),storage:{configured:PERSISTENT_STORAGE,healthy:persistenceHealthy&&lockHeld}})});
+for(const [method,route,fn] of [['get','status',()=>suite500.status()],['post','history',()=>suite500.capture()],['post','contract',req=>suite500.contract(req.body?.epic)]])app[method]('/api/admin/v5000/'+route,requireAdmin,async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req))}catch(e){res.status(409).json({error:'V500_EVIDENCE_UNAVAILABLE'})}});
 app.get('/api/admin/v3500/status',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json(require('./marketpulse-v3500').report({paper:paper50.status(),broker:lab90.status(),confirmations:evidence250.status(),safety:v200.gate(DATA_DIR),storage:{configured:PERSISTENT_STORAGE,healthy:persistenceHealthy&&lockHeld}}))}catch{res.status(409).json({error:'VERIFICATION_UNAVAILABLE'})}});
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch{persistenceHealthy=false}void init()});
 setInterval(()=>{if(!starting)refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
