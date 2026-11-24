@@ -1,0 +1,10 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {validate,transport}=require('../marketpulse-v150-transport');
+test('read-only routes',()=>assert.match(validate('GET','/markets/CS.D.EURUSD.CFD.IP',null),/^https:\/\/demo-api\.ig\.com\//));
+test('login only',()=>assert.match(validate('POST','/session',{identifier:'test',password:'test'}),/session$/));
+test('all dealing mutations denied',()=>{for(const m of ['POST','PUT','DELETE','PATCH'])for(const p of ['/positions/otc','/workingorders/otc','/accounts','/session?x=1'])assert.throws(()=>validate(m,p,{}));});
+test('ambiguous paths denied',()=>{for(const p of ['//other.example','/../session','/%2e%2e/session','/positions%2fotc','/x\\y'])assert.throws(()=>validate('GET',p,null));});
+test('GET body and extra login fields denied',()=>{assert.throws(()=>validate('GET','/positions',{}));assert.throws(()=>validate('POST','/session',{identifier:'x',password:'y',extra:1}));});
+test('transport never invokes fetch for denied writes',async()=>{let calls=0;await assert.rejects(transport('POST','/positions/otc',{}, {},()=>{calls++}));assert.equal(calls,0);});
+test('redirects disabled',async()=>{await transport('GET','/positions',null,{},(url,opts)=>{assert.equal(opts.redirect,'error');assert.equal(opts.method,'GET');return {};});});
