@@ -11,7 +11,9 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='9.5.0';
+const APP_VERSION='15.0.0';
+const v150Transport=require('./marketpulse-v150-transport');
+const LEGACY_MINI_BACKGROUND=process.env.MP_LEGACY_MINI_BACKGROUND==='true';
 const {PaperArchiver}=require('./paper-archiver');
 const {getPaperEvents}=require('./paper-store');
 const {inspectPaperRecovery}=require('./paper-recovery');
@@ -168,7 +170,7 @@ async function request(url,method='GET',body=null,version='1'){
  const headers={'X-IG-API-KEY':process.env.IG_API_KEY||'',VERSION:version,Accept:'application/json'};
  if(auth){headers.CST=auth.cst;headers['X-SECURITY-TOKEN']=auth.xst}
  if(body!==null)headers['Content-Type']='application/json';
- const res=await fetch(HOST+url,{method,headers,body:body===null?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+ const res=await v150Transport.transport(method,url,body,headers);
  const raw=await res.text();let data;try{data=JSON.parse(raw)}catch{data={raw:raw.slice(0,120)}}
  if(!res.ok||data.errorCode)throw Error(`${res.status}: ${data.errorCode||data.raw||'IG request failed'}`);
  return {data,headers:res.headers};
@@ -1141,9 +1143,9 @@ const v68Controller=require('./v68-controller').createV68({
  getSession:()=>auth?{streamUrl:auth.streamUrl,accountId:auth.accountId,cst:auth.cst,xst:auth.xst}:null
 });
 v68Controller.routes(app);
-v68Controller.start();
+if(LEGACY_MINI_BACKGROUND)v68Controller.start();
 // Stream session may not be available until IG login completes.
-const v68StreamTimer=setInterval(()=>{if(auth&&v68Controller.status().streamState==='DISCONNECTED'){
+const v68StreamTimer=setInterval(()=>{if(LEGACY_MINI_BACKGROUND&&auth&&v68Controller.status().streamState==='DISCONNECTED'){
  try{v68Controller.startStream()}catch(e){log('V68 Mini stream: '+e.message)}
 }},30000);
 if(v68StreamTimer.unref)v68StreamTimer.unref();
@@ -1655,9 +1657,9 @@ async function tryAutoStart(){
   log('Automatic IG DEMO trading armed after safety validation');
  }catch(e){log('Auto-start check: '+e.message)}finally{autoStartChecking=false}
 }
-setInterval(()=>tryAutoStart().catch(e=>log('Auto-start failure: '+e.message)),30000);
+// Broker auto-start timer intentionally omitted while execution is hard-blocked.
 
-setInterval(()=>{if(MULTI_MODE)return;tradingCycle().catch(e=>{disarm('Unexpected trading-cycle error');log(e.message)})},15000);
+// Broker trading timer intentionally omitted while execution is hard-blocked.
 setInterval(()=>{refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{checkRestSnapshot().catch(e=>log('REST snapshot check: '+e.message))},300000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;init()}},30000);
