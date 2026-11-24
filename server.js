@@ -9,7 +9,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='30.0.0';
+const APP_VERSION='35.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
 const LEGACY_MINI_BACKGROUND=false;
 const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
@@ -433,6 +433,9 @@ app.get('/api/admin/v250/contracts',requireAdmin,async(_req,res)=>{try{const row
 app.post('/api/admin/v250/recovery',requireAdmin,(_req,res)=>{try{if(process.memoryUsage().rss>=400*1048576)return res.status(409).json({error:'INSUFFICIENT_MEMORY_FOR_CHILD_TEST'});res.json(lab25.crashTest(DATA_DIR))}catch(e){res.status(503).json({error:'LOCAL_CRASH_TEST_FAILED'})}});
 const lab30=require('./marketpulse-v300-lab').create({dir:DATA_DIR,readIG:(route,version)=>api(route,'GET',null,version),epics:MAJOR_EPICS,gate:()=>v200.gate(DATA_DIR),storage:()=>({configured:PERSISTENT_STORAGE,healthy:persistenceHealthy})});
 for(const [method,route,fn] of [['get','status',()=>lab30.status()],['post','snapshot',()=>lab30.snapshot()],['post','risk',req=>lab30.risk(req.body||{})]])app[method]('/api/admin/v300/'+route,requireAdmin,async(req,res)=>{try{res.set('Cache-Control','no-store').json(await fn(req))}catch(e){res.status(409).json({error:String(e.message).slice(0,120)})}});
+const lab35=require('./marketpulse-v350-lab').create({lab30,readIG:(route,version)=>api(route,'GET',null,version)});
+app.get('/api/admin/v350/status',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json(lab35.report())}catch{res.status(409).json({error:'EVIDENCE_UNAVAILABLE'})}});
+app.post('/api/admin/v350/confirmation',requireAdmin,async(req,res)=>{try{res.set('Cache-Control','no-store').json(await lab35.confirmation(req.body?.reference))}catch{res.status(409).json({error:'CONFIRMATION_UNAVAILABLE_OR_INVALID'})}});
 app.get('/',(_req,res)=>res.redirect('/operations.html'));
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch{persistenceHealthy=false}void init()});
 setInterval(()=>{if(!starting)refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
