@@ -1,0 +1,7 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const m=require('../marketpulse-v130-readiness');
+test('source inventory detects dealing reference without authorising it',()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'mp-v13-'));try{fs.writeFileSync(path.join(d,'x.js'),"fetch('/positions/otc',{method:'POST'})");const x=m.inventory(d);assert.equal(x.files.length,1);assert.equal(x.files[0].hits.length,1);assert.equal(x.certifiedComplete,false)}finally{fs.rmSync(d,{recursive:true,force:true})}});
+test('unknown durable state remains blocked',()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'mp-v13-'));try{const r=m.evaluate({dataDir:d,root:d,legacy:{},durable:{},memoryMB:440,storageHealthy:true,readiness:{markets:Array.from({length:7},()=>({streamFresh:true}))},brokerBlocked:true,bootAt:'now'});assert.equal(r.brokerOrdersAllowed,false);assert.ok(r.barriers.includes('DURABLE_LATCH_NOT_VERIFIED'))}finally{fs.rmSync(d,{recursive:true,force:true})}});
+test('memory at 450 closes shadow gate',()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'mp-v13-'));try{const r=m.evaluate({dataDir:d,root:d,legacy:{},durable:{},memoryMB:450,storageHealthy:true,readiness:{markets:[]},brokerBlocked:true});assert.equal(r.memory.shadowGateOpen,false)}finally{fs.rmSync(d,{recursive:true,force:true})}});
+test('recovery cases remain explicitly model only',()=>{assert.ok(m.recoveryCases().every(x=>x.modelOnly&&!x.brokerTested))});
