@@ -9,7 +9,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='500.0.0';
+const APP_VERSION='501.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
 const LEGACY_MINI_BACKGROUND=false;
 const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
@@ -461,6 +461,7 @@ app.post('/api/admin/lifecycle/run',requireAdmin,async(_req,res)=>{try{res.set('
 app.get('/api/admin/lifecycle/status',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json(lifecycle.status())}catch{res.status(409).json({error:'LIFECYCLE_STORAGE_UNAVAILABLE'})}});
 app.post('/api/admin/broker-evidence/run',requireAdmin,async(_req,res)=>{try{res.set('Cache-Control','no-store').json(await brokerEvidence.run())}catch{res.status(409).json({error:'BROKER_EVIDENCE_RUN_FAILED'})}});
 app.get('/api/admin/broker-evidence/status',requireAdmin,(_req,res)=>{try{res.set('Cache-Control','no-store').json(brokerEvidence.status())}catch{res.status(409).json({error:'EVIDENCE_UNAVAILABLE'})}});
+app.get('/api/admin/evidence-mega/status',requireAdmin,(_req,res)=>{try{const m=require('./evidence-mega'),key=require('node:crypto').createHash('sha256').update(auth.accountId).digest('hex'),runs=brokerEvidence.status().runs.filter(r=>r.accountKey===key),captures=lifecycle.status().captures.filter(r=>r.accountKey===key),c=captures.at(-1),p=paper50.status();res.set('Cache-Control','no-store').json({version:APP_VERSION,captureAt:c?.at||null,matches:c?m.reconcile(runs,c.activities,c.transactions).map(x=>({...x,monetary:m.monetary(x,c.contracts)})):[],paper:m.analytics(p.events),paperHeartbeatAgeMs:p.lastTick?Date.now()-Date.parse(p.lastTick):null,monitoringGaps:p.monitoringGaps,storageHealthy:PERSISTENT_STORAGE&&persistenceHealthy&&lockHeld,safety:v200.gate(DATA_DIR),brokerOrdersAllowed:false,certified:false})}catch{res.status(409).json({error:'MEGA_EVIDENCE_UNAVAILABLE'})}});
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch{persistenceHealthy=false}void init()});
 setInterval(()=>{if(!starting)refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;void init()}},30000);
