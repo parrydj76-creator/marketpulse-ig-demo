@@ -1,0 +1,13 @@
+const test=require('node:test'),assert=require('node:assert/strict'),m=require('../execution-v1500');
+const now=Date.now(),c={snapshot:{bid:1.3,offer:1.31,delayTime:0,marketStatus:'TRADEABLE',updateTimeUTC:new Date(now).toISOString()}};
+test('raw null not zero',()=>assert.equal(m.rawDelay(null).explicitZero,false));
+test('raw string zero',()=>assert.equal(m.rawDelay('0').explicitZero,true));
+test('REST fresh',()=>assert.equal(m.restQuote(c,now,now).valid,true));
+test('REST stale',()=>assert.equal(m.restQuote(c,now,now+16000).valid,false));
+test('REST missing source timestamp',()=>assert.equal(m.restQuote({snapshot:{...c.snapshot,updateTimeUTC:null}},now,now).valid,false));
+test('REST delayed',()=>assert.equal(m.restQuote({snapshot:{...c.snapshot,delayTime:1}},now,now).valid,false));
+test('risk conversion',()=>{const q=new Map([['CS.D.GBPUSD.CFD.IP',m.restQuote(c,now,now)]]);assert.equal(m.restRisk({epic:'CS.D.GBPUSD.CFD.IP',arithmeticValid:true,currency:'USD',value:10},q).gbpPerPip,10/1.3)});
+test('risk missing quote',()=>assert.equal(m.restRisk({},new Map()).gbpPerPip,null));
+test('budget valid',()=>assert.equal(m.budget({risk:25,openRisk:0,loss:75,entries:2}).allowed,true));
+test('budget rejects excess',()=>assert.equal(m.budget({risk:25,openRisk:1,loss:75,entries:2}).allowed,false));
+test('budget rejects fourth entry',()=>assert.equal(m.budget({risk:1,openRisk:0,loss:0,entries:3}).allowed,false));
