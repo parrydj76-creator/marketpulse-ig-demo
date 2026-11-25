@@ -1,0 +1,7 @@
+const {test}=require('node:test'),a=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),m=require('../execution-v600');
+const now=100000,x={pip:.0001,pipValue:1,gbpPerQuote:.7688881023717599,quoteAt:now,fxAt:now,entry:1.09656,stop:1.09776,target:1.09476,direction:'SELL',minSize:.1,sizeStep:.1,minStopPips:2,budget:25,dailyRemaining:100,exposureRemaining:25,precision:5};
+test('Mini fixture conservative risk',()=>{const r=m.risk(x,now);a.ok(r.estimatedGBP<=25);a.equal(r.certified,false)});
+for(const [name,patch] of Object.entries({stale:{fxAt:0},future:{quoteAt:now+1},wrongStop:{stop:1.095},wrongTarget:{target:1.098},precision:{stop:1.097761},missing:{gbpPerQuote:null},daily:{dailyRemaining:0},minimum:{minSize:100},direction:{direction:'LONG'}}))test(name,()=>a.throws(()=>m.risk({...x,...patch},now)));
+test('persistent unknown and duplicate protection',()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),'mp600-'));try{const r=m.recoveryTest(d);a.ok(r.duplicateBlocked&&r.replayBlocked);a.equal(r.resolved,'CONFIRMED')}finally{fs.rmSync(d,{recursive:true,force:true})}});
+test('actual Mini no stop cannot verify',()=>a.equal(m.stopEvidence({position:{level:1.09656,size:1,direction:'SELL',stopLevel:null}},{instrument:{onePipMeans:'0.0001 USD/EUR'}}).observed,false));
+test('observed stop distance',()=>a.ok(Math.abs(m.stopEvidence({position:{level:1.09656,size:1,direction:'SELL',stopLevel:1.09776}},{instrument:{onePipMeans:'0.0001 USD/EUR'}}).stopPips-12)<1e-8));
