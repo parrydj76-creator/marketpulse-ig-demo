@@ -9,7 +9,7 @@ const startupMemoryTimer = setInterval(() => {
   console.log('[MEMORY_SAMPLE]', JSON.stringify({rssMB:Math.round(m.rss/1048576),heapUsedMB:Math.round(m.heapUsed/1048576),heapTotalMB:Math.round(m.heapTotal/1048576),externalMB:Math.round(m.external/1048576),arrayBuffersMB:Math.round((m.arrayBuffers||0)/1048576),uptimeSeconds:Math.round(process.uptime())}));
 }, 60000);
 startupMemoryTimer.unref();
-const APP_VERSION='1000.0.0';
+const APP_VERSION='1100.0.0';
 const v150Transport=require('./marketpulse-v150-transport');
 const LEGACY_MINI_BACKGROUND=false;
 const LEGACY_PAPER_BACKGROUND=process.env.MP_LEGACY_PAPER_BACKGROUND==='true';
@@ -117,7 +117,7 @@ function recordTrade(kind,details){trade.lastAction={time:new Date().toISOString
 
 const restState={enabled:true,intervalSeconds:REST_POLL_SECONDS,requestedMarkets:REST_MAX_MARKETS,lastPoll:null,nextPoll:null,lastError:'',rateLimitedUntil:null,attempted:0,succeeded:0,failed:0,marketResults:{}};
 let restPolling=false,restTimer=null,restBackoffUntil=0;
-const markets=new Map(),quotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
+const markets=new Map(),quotes=new Map(),streamQuotes=new Map(),candles=new Map(),current=new Map(),signals=new Map(),events=[];
 let accepted=new Set(),diagnostics=new Map();
 let probeStartedAt=null,restSnapshot=null,restSnapshotError="",restSnapshotAt=null;
 let auth=null,client=null,sub=null,streamStatus='disconnected',streamError='',lastConnected=null,account=null,positions=[],lastAccountRefresh=null,lastDiscovery=null,discoverError='',reconnectAt=0,starting=false;
@@ -177,7 +177,7 @@ function analyse(epic){const bars=candles.get(epic)||[],q=quotes.get(epic),fresh
  return {epic,direction,score,bars:bars.length,rsi:r,ema9:e9,ema21:e21,reason:'Experimental heuristic from sampled quotes; not a win probability or tick-quality signal'};
 }
 function closeStream(){
- accepted.clear();diagnostics.clear();probeStartedAt=null;
+ streamQuotes.clear();accepted.clear();diagnostics.clear();probeStartedAt=null;
  if(client){try{if(sub)for(const item of sub)client.unsubscribe(item);client.disconnect()}catch(e){log('Stream cleanup: '+e.message)}}
  client=null;sub=null;for(const m of markets.values())m.streaming=false;
 }
@@ -210,19 +210,20 @@ function startStream(){
     log('Probe accepted: '+key);
    },
    onSubscriptionError(code,message){
-    accepted.delete(key);const d=diagnostics.get(key);
+    streamQuotes.delete(epic);accepted.delete(key);const d=diagnostics.get(key);
     if(d){d.subscribed=false;d.errors.push({code,message:String(message).slice(0,150)});if(d.errors.length>20)d.errors.shift();}
     streamError=`${key}: subscription ${code}: ${message}`;log(streamError);
    },
    onItemLostUpdates(itemName,lostUpdates){log(`Probe lost updates ${key}: ${lostUpdates}`)},
    onItemUpdate(update){
+    if(client!==ls)return;
     const d=diagnostics.get(key);if(!d)return;
     d.updates++;d.lastEvent=new Date().toISOString();
     const values={};
     for(const field of fields){try{values[field]=update.getValue(field)}catch(e){values[field]='FIELD_ERROR'}}
     d.lastFields=values;
     if(d.updates<=3)log('Raw price event '+key+' '+JSON.stringify(values));
-    const old=quotes.get(epic)||{};
+    const old=streamQuotes.get(epic)||{};
     const bid=n(values.BID??values.BIDPRICE1)??old.bid;
     const ask=n(values.OFFER??values.ASKPRICE1)??old.ask;
     if(bid==null||ask==null||bid<=0||ask<=bid){
@@ -232,7 +233,7 @@ function startStream(){
     d.validQuotes++;
     const state=String(values.DLG_FLAG??old.marketState??'UNKNOWN').trim().toUpperCase();
     const delayed=values.DELAY??old.delayed??null; // null means IG has not confirmed the delay status
-    const now=Date.now();quotes.set(epic,{bid,ask,spread:ask-bid,at:now,marketState:state,delayed,source:'STREAM'});
+    const now=Date.now();const streamQuote={bid,ask,spread:ask-bid,at:now,marketState:state,delayed,source:'STREAM'};quotes.set(epic,streamQuote);streamQuotes.set(epic,streamQuote);
     const market=markets.get(epic);if(market)market.streaming=true;
     // Only build candles for non-delayed quotes, avoiding closed/suspended markets.
     if(state==='DEAL' && (delayed===null || String(delayed)==='0'))candleFromQuote(epic,(bid+ask)/2,now);
@@ -251,13 +252,13 @@ function startStream(){
   diagnostics.set(key,{epic:null,kind:'account-control',fields,subscribed:false,updates:0,validQuotes:0,errors:[],lastEvent:null,lastFields:null});
   subscription.addListener({
    onSubscription(){accepted.add(key);diagnostics.get(key).subscribed=true;log('Probe accepted: '+key)},
-   onSubscriptionError(code,message){accepted.delete(key);const d=diagnostics.get(key);d.subscribed=false;d.errors.push({code,message:String(message).slice(0,150)});if(d.errors.length>20)d.errors.shift();log('Account probe error '+code+': '+message)},
+   onSubscriptionError(code,message){streamQuotes.delete(epic);accepted.delete(key);const d=diagnostics.get(key);d.subscribed=false;d.errors.push({code,message:String(message).slice(0,150)});if(d.errors.length>20)d.errors.shift();log('Account probe error '+code+': '+message)},
    onItemUpdate(update){const d=diagnostics.get(key);d.updates++;d.lastEvent=new Date().toISOString();d.lastFields=Object.fromEntries(fields.map(f=>[f,update.getValue(f)]));if(d.updates<=2)log('Account probe update received')}
   });
   subscriptions.push(subscription);
  }
  ls.addListener({
-  onStatusChange(status){streamStatus=status;if(String(status).startsWith('CONNECTED'))lastConnected=new Date().toISOString();log('Lightstreamer status: '+status)},
+  onStatusChange(status){if(client!==ls)return;if(!String(status).startsWith('CONNECTED'))streamQuotes.clear();streamStatus=status;if(String(status).startsWith('CONNECTED'))lastConnected=new Date().toISOString();log('Lightstreamer status: '+status)},
   onServerError(code,message){streamError=`Server ${code}: ${message}`;log(streamError)}
  });
  client=ls;sub=subscriptions;ls.connect();
@@ -465,10 +466,10 @@ app.get('/api/admin/evidence-mega/status',requireAdmin,(_req,res)=>{try{const m=
 const execution600=require('./execution-v600');
 let busy600=false;
 app.post('/api/admin/v600/check',requireAdmin,async(_req,res)=>{if(busy600)return res.status(409).json({error:'BUSY'});busy600=true;try{const id=auth?.accountId;if(!id||!PERSISTENT_STORAGE||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE');const raw=await api('/positions','GET',null,'2');if(!Array.isArray(raw.positions)||raw.positions.length>20)throw Error('POSITION_SCHEMA');const stops=[];for(const p of raw.positions){const epic=p.market?.epic;if(!/^CS\.D\.[A-Z]{6}\.(CFD|MINI)\.IP$/.test(epic||''))continue;const c=await api('/markets/'+epic,'GET',null,'3');stops.push(execution600.stopEvidence(p,c))}if(auth?.accountId!==id||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE_CHANGED');const now=Date.now(),fixture=execution600.risk({pip:.0001,pipValue:1,gbpPerQuote:.7688881023717599,quoteAt:now,fxAt:now,entry:1.09656,stop:1.09776,target:1.09476,direction:'SELL',minSize:.1,sizeStep:.1,minStopPips:2,budget:25,dailyRemaining:100,exposureRemaining:25,precision:5},now);res.set('Cache-Control','no-store').json({version:APP_VERSION,riskFixture:fixture,riskFixtureScope:'historical Mini conversion with synthetic fresh timestamps and assumed size step; not live sizing',stops,recovery:execution600.recoveryTest(DATA_DIR),hosting:{uptimeSeconds:process.uptime(),storageConfigured:PERSISTENT_STORAGE,storageHealthy:persistenceHealthy&&lockHeld,alwaysOnVerified:false,streamStatus},safety:v200.gate(DATA_DIR),brokerOrdersAllowed:false,certified:false})}catch(e){res.status(409).json({error:'V600_CHECK_FAILED',detail:/^[A-Z_]+$/.test(e.message)?e.message:'BROKER_OR_STORAGE_REQUEST_FAILED'})}finally{busy600=false}});
-const v1000=require('./execution-v1000');
+const v1000=require('./execution-v1000'),v1100=require('./execution-v1100');
 const boot1000=require('node:crypto').randomUUID();let busy1000=false,health1000=null;
 setInterval(()=>{try{if(PERSISTENT_STORAGE&&persistenceHealthy&&lockHeld)health1000=v1000.health(DATA_DIR,Date.now(),boot1000)}catch{health1000=null}},60000).unref();
-app.post('/api/admin/v1000/check',requireAdmin,async(_req,res)=>{if(busy1000)return res.status(409).json({error:'BUSY'});busy1000=true;try{const id=auth?.accountId;if(!id||!PERSISTENT_STORAGE||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE');const contracts=[],stops=[],errors=[];const raw=await api('/positions','GET',null,'2');if(!Array.isArray(raw.positions)||raw.positions.length>20)throw Error('POSITION_SCHEMA');const epics=new Set([...MAJOR_EPICS,'CS.D.EURUSD.MINI.IP',...raw.positions.map(p=>p.market?.epic).filter(e=>/^CS\.D\.[A-Z]{6}\.(CFD|MINI)\.IP$/.test(e||''))]);for(const epic of epics){try{const c=await api('/markets/'+epic,'GET',null,'3');for(const p of raw.positions.filter(p=>p.market?.epic===epic))stops.push(execution600.stopEvidence(p,c));contracts.push(v1000.inspect(epic,c,quotes,Date.now()))}catch(e){errors.push({epic,error:/^[A-Z_]+$/.test(e.message)?e.message:'BROKER_REQUEST_FAILED'})}}if(auth?.accountId!==id||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE_CHANGED');const recovery=process.memoryUsage().rss<300*1048576?await v1000.crashTest(DATA_DIR):{skipped:'MEMORY_GUARD'};res.set('Cache-Control','no-store').json({version:APP_VERSION,contracts,stops,errors,recovery,hosting:health1000,uptimeSeconds:process.uptime(),paper:require('./evidence-mega').analytics(paper50.status().events),safety:v200.gate(DATA_DIR),blockers:['DEAL_SIZE_INCREMENT_UNVERIFIED','BROKER_STOP_UNCERTIFIED','BROKER_RECOVERY_UNVERIFIED','EXTERNAL_UPTIME_UNVERIFIED'],brokerOrdersAllowed:false,certified:false})}catch(e){res.status(409).json({error:'V1000_CHECK_FAILED',detail:/^[A-Z_]+$/.test(e.message)?e.message:'REQUEST_FAILED'})}finally{busy1000=false}});
+app.post('/api/admin/v1000/check',requireAdmin,async(_req,res)=>{if(busy1000)return res.status(409).json({error:'BUSY'});busy1000=true;try{const id=auth?.accountId;if(!id||!PERSISTENT_STORAGE||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE');const contracts=[],stops=[],errors=[];const raw=await api('/positions','GET',null,'2');if(!Array.isArray(raw.positions)||raw.positions.length>20)throw Error('POSITION_SCHEMA');const epics=new Set([...MAJOR_EPICS,'CS.D.EURUSD.MINI.IP',...raw.positions.map(p=>p.market?.epic).filter(e=>/^CS\.D\.[A-Z]{6}\.(CFD|MINI)\.IP$/.test(e||''))]);for(const epic of epics){try{const c=await api('/markets/'+epic,'GET',null,'3');for(const p of raw.positions.filter(p=>p.market?.epic===epic))stops.push(execution600.stopEvidence(p,c));contracts.push(v1100.inspect(epic,c,String(streamStatus).startsWith('CONNECTED')?streamQuotes:new Map(),Date.now()))}catch(e){errors.push({epic,error:/^[A-Z_]+$/.test(e.message)?e.message:'BROKER_REQUEST_FAILED'})}}if(auth?.accountId!==id||!persistenceHealthy||!lockHeld)throw Error('ACCOUNT_OR_STORAGE_CHANGED');const recovery=process.memoryUsage().rss<300*1048576?await v1000.crashTest(DATA_DIR):{skipped:'MEMORY_GUARD'};res.set('Cache-Control','no-store').json({version:APP_VERSION,contracts,stops,errors,recovery,hosting:health1000,uptimeSeconds:process.uptime(),paper:require('./evidence-mega').analytics(paper50.status().events),safety:v200.gate(DATA_DIR),...v1100.readiness(contracts,stops,String(streamStatus).startsWith('CONNECTED')),streamStatus,fxDiagnostics:[...MAJOR_EPICS].map(epic=>({epic,...v1100.quoteStatus(streamQuotes.get(epic),Date.now())})),brokerOrdersAllowed:false,certified:false})}catch(e){res.status(409).json({error:'V1000_CHECK_FAILED',detail:/^[A-Z_]+$/.test(e.message)?e.message:'REQUEST_FAILED'})}finally{busy1000=false}});
 const port=Number(process.env.PORT)||3000;acquireLocalLock();app.listen(port,'0.0.0.0',()=>{restoreTrade();restoreCandles();try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.write-test');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe)}catch{persistenceHealthy=false}void init()});
 setInterval(()=>{if(!starting)refreshAccount().catch(e=>log('Account refresh: '+e.message))},120000);
 setInterval(()=>{if(!starting&&(!client||streamStatus==='error'||streamStatus==='disconnected'||String(streamStatus).startsWith('DISCONNECTED'))&&Date.now()>reconnectAt){reconnectAt=Date.now()+60000;void init()}},30000);
