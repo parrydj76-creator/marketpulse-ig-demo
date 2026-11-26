@@ -184,3 +184,12 @@ test('adapter maps v2000 plan to a stable signal; refuses without explicit size'
   assert.equal(toSignal({ ...plan, direction: 'SHORT' }, { IG_EXEC_SIZE: '1' }).direction, 'SELL');
   assert.equal(toSignal({ ...plan, direction: 'WAIT' }, { IG_EXEC_SIZE: '1' }), null);
 });
+
+test('IG minimum size is enforced before any order is sent', async () => {
+  const { mock, engine, store } = await setup();
+  await store.setState('risk', { minSize: 0.01, cooldownMinutes: 0 });
+  const r = await engine.executeSignal(sig('tiny', 'GBP/USD', { size: 0.1 }));   // mock min is 0.5
+  assert.match(r.reason, /SIZE_BELOW_BROKER_MIN/);
+  assert.equal(mock.createCalls, 0);
+  await mock.stop();
+});
