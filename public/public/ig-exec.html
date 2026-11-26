@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IG DEMO execution</title>
+<style>body{font:15px system-ui;margin:0;padding:16px;max-width:640px;margin:auto;background:#0f1115;color:#e8e8e8}
+button{font:inherit;padding:12px 16px;border-radius:8px;border:0;margin:4px 4px 4px 0}.k{background:#c62828;color:#fff}.r{background:#2e7d32;color:#fff}.n{background:#333;color:#fff}
+input{width:100%;padding:10px;box-sizing:border-box;border-radius:8px;border:1px solid #444;background:#1a1d24;color:#fff}pre{background:#1a1d24;padding:10px;border-radius:8px;overflow:auto;font-size:12px}
+.b{display:inline-block;padding:4px 10px;border-radius:12px;font-weight:600}.on{background:#c62828}.off{background:#2e7d32}</style></head><body>
+<h2>IG DEMO execution</h2><p>DEMO account only. Admin token stays in this page's memory.</p>
+<input id="t" type="password" placeholder="ADMIN_TOKEN"><p><span id="s" class="b">?</span></p>
+<button class="n" onclick="go('GET','status')">Refresh</button>
+<button class="k" onclick="if(confirm('Close ALL positions and stop trading?'))go('POST','kill',{closeAll:true,reason:'dashboard'})">KILL SWITCH</button>
+<button class="r" onclick="if(confirm('Resume automated trading?'))go('POST','resume')">Resume</button>
+<button class="n" onclick="go('GET','history')">History</button><button class="n" onclick="go('POST','reconcile')">Reconcile</button>
+<pre id="o">Enter token, press Refresh.</pre>
+<script>
+async function go(m,p,b){const o=document.getElementById('o'),s=document.getElementById('s');try{const r=await fetch('/api/admin/ig-exec/'+p,{method:m,headers:{'x-admin-token':document.getElementById('t').value,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+const ct=r.headers.get('content-type')||'';
+if(!ct.includes('json')){s.textContent='NOT INSTALLED';s.className='b on';o.textContent='HTTP '+r.status+': the server has no ig-exec route. The deployed server.js does not include the ig-exec patch (or the deploy has not finished). Redeploy with the updated server.js and the ig-exec folder.';return}
+const j=await r.json();
+if(r.status===401){s.textContent='BAD TOKEN';s.className='b on';o.textContent='Admin token rejected.';return}
+if(r.status===503){s.textContent='NOT RUNNING';s.className='b on';o.textContent='Execution is not running. Reason: '+j.reason;return}
+o.textContent=JSON.stringify(j,null,2);
+if(j.killed!==undefined){s.textContent=j.killed?'KILLED':'RUNNING';s.className='b '+(j.killed?'on':'off')}}catch(e){o.textContent='Error: '+e.message}}
+</script></body></html>
