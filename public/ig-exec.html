@@ -12,6 +12,12 @@ input{width:100%;padding:10px;box-sizing:border-box;border-radius:8px;border:1px
 <button class="n" onclick="go('GET','history')">History</button><button class="n" onclick="go('POST','reconcile')">Reconcile</button>
 <pre id="o">Enter token, press Refresh.</pre>
 <script>
-async function go(m,p,b){const o=document.getElementById('o');try{const r=await fetch('/api/admin/ig-exec/'+p,{method:m,headers:{'x-admin-token':document.getElementById('t').value,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});const j=await r.json();o.textContent=JSON.stringify(j,null,2);
-if(j.killed!==undefined){const s=document.getElementById('s');s.textContent=j.killed?'KILLED':'RUNNING';s.className='b '+(j.killed?'on':'off')}}catch(e){o.textContent='Error: '+e.message}}
+async function go(m,p,b){const o=document.getElementById('o'),s=document.getElementById('s');try{const r=await fetch('/api/admin/ig-exec/'+p,{method:m,headers:{'x-admin-token':document.getElementById('t').value,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+const ct=r.headers.get('content-type')||'';
+if(!ct.includes('json')){s.textContent='NOT INSTALLED';s.className='b on';o.textContent='HTTP '+r.status+': the server has no ig-exec route. The deployed server.js does not include the ig-exec patch (or the deploy has not finished). Redeploy with the updated server.js and the ig-exec folder.';return}
+const j=await r.json();
+if(r.status===401){s.textContent='BAD TOKEN';s.className='b on';o.textContent='Admin token rejected.';return}
+if(r.status===503){s.textContent='NOT RUNNING';s.className='b on';o.textContent='Execution is not running. Reason: '+j.reason;return}
+o.textContent=JSON.stringify(j,null,2);
+if(j.killed!==undefined){s.textContent=j.killed?'KILLED':'RUNNING';s.className='b '+(j.killed?'on':'off')}}catch(e){o.textContent='Error: '+e.message}}
 </script></body></html>
