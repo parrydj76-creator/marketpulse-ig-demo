@@ -473,8 +473,10 @@ app.post('/api/admin/v1000/check',requireAdmin,async(_req,res)=>{if(busy1000)ret
 const v1500new=require('./execution-v1500');
 // ---- IG DEMO autonomous execution (ig-exec). Independent of the legacy BROKER_DEMO_EXECUTION flag (left false).
 // Starts only if IG_EXEC_ENABLED=true; any config problem leaves the app running paper-only.
-let igExec=null;
-try{if(process.env.IG_EXEC_ENABLED==='true'){igExec=require('./ig-exec').bootExecution({logger:console});app.use('/api/admin/ig-exec',igExec.router)}}catch(e){igExec=null;log('IG exec NOT started: '+e.message)}
+let igExec=null,igExecWhy='IG_EXEC_ENABLED is not set to true';
+try{if(process.env.IG_EXEC_ENABLED==='true'){igExec=require('./ig-exec').bootExecution({logger:console});app.use('/api/admin/ig-exec',igExec.router);igExecWhy=null}}catch(e){igExec=null;igExecWhy=String(e.message).slice(0,200);log('IG exec NOT started: '+igExecWhy)}
+// Always answer (as JSON, admin-only) so the dashboard can say WHY execution is not running.
+if(!igExec)app.use('/api/admin/ig-exec',requireAdmin,(_req,res)=>res.status(503).json({running:false,killed:true,reason:igExecWhy}));
 function igOnDecision2000(result){try{if(!igExec||result.decision!=='PAPER_ENTRY')return;const sig=require('./ig-exec/src/adapter').toSignal(result.s.position);if(!sig){log('IG_EXEC skipped: IG_EXEC_SIZE not set or bad plan');return}igExec.engine.executeSignal(sig).then(r=>log('IG_EXEC '+sig.id+' '+JSON.stringify({ok:r.ok,reason:r.reason,dealId:r.dealId}))).catch(e=>log('IG_EXEC error: '+e.message))}catch(e){log('IG_EXEC hook: '+e.message)}}
 const sim2000=require('./execution-v2000');
 const bars2000=new Map();let status2000={decision:'NOT_STARTED'},busy2000=false,pool2000;
