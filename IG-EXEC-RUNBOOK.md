@@ -61,3 +61,15 @@ size you'd be happy to lose entirely. I can then add a separate hardened live pr
 - At size 1 a 12-pip stop risks about $120 (about £90), a 18-pip target is worth about $180, and the quoted spread was about 0.9 pip. The paper engine assumes £25 risk, so paper P&L understates demo (and any live) money at risk by roughly 3.5x.
 - Set `IG_PIP_VALUE_GBP=7.6` (about $10 / GBPUSD 1.31) so estimated P&L and the daily loss limit are on the right scale. With the default of 1 the loss limit would be ~7x too lenient.
 - With the default £50 daily loss limit, one stop-out ends trading for the day. That is intentional.
+
+## Acceptance result (26 Nov 2026): 14/14 PASS on real IG DEMO
+Needed fix: IG only accepts the market's own currency (USD for EURUSD CFD) — the engine now reads it from IG.
+Verified live: order + confirmation, broker stop/limit (12/18 pips exact), duplicate rejection, restart recovery, normal close, kill-switch close.
+Observed round-trip cost at size 1: about 0.8 pip (about £6). With a 12-pip stop / 18-pip target the strategy must win roughly 43% of trades just to break even after spread.
+
+## Before pressing Resume
+1. Deploy this bundle; verify: `grep -c "rules.currency" ig-exec/src/execution/engine.js` prints 1.
+2. Render env: `IG_EXEC_SIZE=1`, `IG_PIP_VALUE_GBP=7.6`, `IG_EXEC_EPICS=CS.D.EURUSD.CFD.IP`.
+3. Shell: `cd ig-exec && node scripts/pg-smoke.js` must print `PG SMOKE TEST PASSED` (tests every database call; cleans up after itself).
+4. Start the paper simulation in the existing dashboard. It needs 30 consecutive 5-minute bars (about 2.5 hours) after EVERY restart/deploy before it can signal.
+5. Press Resume on /ig-exec.html. FX is closed from Friday ~22:00 to Sunday ~22:00 UK time.
