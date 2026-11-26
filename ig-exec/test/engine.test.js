@@ -184,3 +184,31 @@ test('adapter maps v2000 plan to a stable signal; refuses without explicit size'
   assert.equal(toSignal({ ...plan, direction: 'SHORT' }, { IG_EXEC_SIZE: '1' }).direction, 'SELL');
   assert.equal(toSignal({ ...plan, direction: 'WAIT' }, { IG_EXEC_SIZE: '1' }), null);
 });
+
+test('IG minimum size is enforced before any order is sent', async () => {
+  const { mock, engine, store } = await setup();
+  await store.setState('risk', { minSize: 0.01, cooldownMinutes: 0 });
+  const r = await engine.executeSignal(sig('tiny', 'GBP/USD', { size: 0.1 }));   // mock min is 0.5
+  assert.match(r.reason, /SIZE_BELOW_BROKER_MIN/);
+  assert.equal(mock.createCalls, 0);
+  await mock.stop();
+});
+
+test('currencyCode comes from the market list (USD-only market is not sent GBP)', async () => {
+  const { mock, engine } = await setup();
+  const r = await engine.executeSignal(sig('cur'));
+  assert.equal(r.ok, true);
+  assert.equal(mock.lastCreate.currencyCode, 'USD');
+  await mock.stop();
+});
+
+test('PgStore.upsertPosition: partial update is an UPDATE (never a NOT-NULL-violating INSERT)', async () => {
+  const { PgStore } = require('../src/execution/store');
+  const calls = []; let rows = 1;
+  const store = new PgStore({ query: async (sql, args) => { calls.push(sql.split(' ')[0]); return { rowCount: rows, rows: [] }; } });
+  await store.upsertPosition({ dealId: 'D1', status: 'CLOSED', closedAt: new Date() });
+  assert.deepEqual(calls, ['UPDATE']);
+  calls.length = 0; rows = 0;                                   // row absent -> falls through to INSERT
+  await store.upsertPosition({ dealId: 'D2', epic: 'E', direction: 'BUY', size: 1, status: 'OPEN' });
+  assert.deepEqual(calls, ['UPDATE', 'INSERT']);
+});

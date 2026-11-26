@@ -53,11 +53,16 @@ class PgStore {
     await this.db.query(`UPDATE ig_orders SET ${sets.join(',')} WHERE deal_reference=$1`, [ref, ...keys.map((k) => (k === 'signal' ? JSON.stringify(patch[k]) : patch[k]))]);
   }
   async listOrders(statuses) { return (await this.db.query('SELECT * FROM ig_orders WHERE status = ANY($1)', [statuses])).rows.map(out); }
+  // UPDATE first: Postgres checks NOT NULL on an INSERT's proposed row before conflict handling,
+  // so a partial ON CONFLICT upsert (e.g. just status/closedAt) would fail on an existing position.
   async upsertPosition(p) {
-    const keys = Object.keys(p).filter((k) => POS_COLS.includes(k));
-    const cols = keys.map(snake), ph = keys.map((_, i) => `$${i + 1}`);
-    const upd = keys.filter((k) => k !== 'dealId').map((k) => `${snake(k)}=EXCLUDED.${snake(k)}`);
-    await this.db.query(`INSERT INTO ig_positions (${cols}) VALUES (${ph}) ON CONFLICT (deal_id) DO UPDATE SET ${upd}`, keys.map((k) => p[k]));
+    const keys = Object.keys(p).filter((k) => POS_COLS.includes(k) && k !== 'dealId');
+    if (keys.length) {
+      const r = await this.db.query(`UPDATE ig_positions SET ${keys.map((k, i) => `${snake(k)}=$${i + 2}`)} WHERE deal_id=$1`, [p.dealId, ...keys.map((k) => p[k])]);
+      if (r.rowCount > 0) return;
+    }
+    const all = ['dealId', ...keys];
+    await this.db.query(`INSERT INTO ig_positions (${all.map(snake)}) VALUES (${all.map((_, i) => `$${i + 1}`)})`, all.map((k) => p[k]));
   }
   async getPosition(id) { return out((await this.db.query('SELECT * FROM ig_positions WHERE deal_id=$1', [id])).rows[0]); }
   async listPositions(status) { return (await this.db.query('SELECT * FROM ig_positions WHERE status=$1', [status])).rows.map(out); }

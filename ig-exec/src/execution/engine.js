@@ -36,6 +36,21 @@ class ExecutionEngine {
       risk: await this._cfg(), openPositions: await this.store.listPositions('OPEN') };
   }
 
+  // IG dealing rules (min size, min stop/limit distance, market status), cached 10 min. Unknown rules = no trade.
+  async _rules(epic) {
+    this._rc = this._rc || new Map();
+    const c = this._rc.get(epic);
+    if (c && Date.now() - c.at < 600000) return c.rules;
+    const m = await this.ig.market(epic);
+    // IG only accepts a currency from the market's own list. Prefer GBP if offered, else the default, else the first.
+    const cur = m.instrument?.currencies || [];
+    const currency = cur.find((x) => x.code === 'GBP')?.code || cur.find((x) => x.isDefault)?.code || cur[0]?.code || 'GBP';
+    const rules = { currency, status: m.snapshot?.marketStatus, minSize: Number(m.dealingRules?.minDealSize?.value || 0),
+      minDist: Number(m.dealingRules?.minNormalStopOrLimitDistance?.value || 0) };
+    this._rc.set(epic, { at: Date.now(), rules });
+    return rules;
+  }
+
   // ---------- opening ----------
   async executeSignal(sig) {
     if (!this.armed) return this._reject(sig, 'EXECUTION_DISABLED');
@@ -61,6 +76,11 @@ class ExecutionEngine {
       ordersToday: await this.store.countOrdersSince(dayStart),
       lastOrderAt: await this.store.lastOrderAt(epic) });
     if (!v.ok) return this._reject(sig, v.reason);
+    let rules;
+    try { rules = await this._rules(epic); } catch { return this._reject(sig, 'BROKER_RULES_UNAVAILABLE'); }
+    if (rules.status && rules.status !== 'TRADEABLE') return this._reject(sig, 'MARKET_NOT_TRADEABLE');
+    if (v.size < rules.minSize) return this._reject(sig, `SIZE_BELOW_BROKER_MIN(${rules.minSize})`);
+    if (sig.stopPips < rules.minDist || (sig.targetPips && sig.targetPips < rules.minDist)) return this._reject(sig, `DISTANCE_BELOW_BROKER_MIN(${rules.minDist})`);
 
     // Duplicate prevention #1: idempotency key unique in DB (same signal can never create two orders).
     const ins = await this.store.insertOrder({ idemKey: String(sig.id), dealReference: ref, epic, pair: sig.pair || pairOf(epic), direction: sig.direction,
@@ -76,7 +96,7 @@ class ExecutionEngine {
 
     await this.store.updateOrder(ref, { status: 'SUBMITTING' }); // persisted BEFORE the network call
     try {
-      await this.ig.openPosition({ epic, expiry: '-', direction: sig.direction, size: v.size, orderType: 'MARKET', currencyCode: 'GBP',
+      await this.ig.openPosition({ epic, expiry: '-', direction: sig.direction, size: v.size, orderType: 'MARKET', currencyCode: rules.currency,
         forceOpen: true, guaranteedStop: false, stopDistance: sig.stopPips,
         ...(sig.targetPips ? { limitDistance: sig.targetPips } : {}), dealReference: ref });
     } catch (e) {
@@ -99,7 +119,7 @@ class ExecutionEngine {
     if (['FILLED', 'REJECTED', 'FAILED'].includes(order.status)) return { ok: order.status === 'FILLED', order };
     const c = await this._confirmLoop(ref, retries);
     if (!c) return { ok: false, pending: true, reason: 'UNRESOLVED', order };
-    if (c.dealStatus !== 'ACCEPTED') { await this.store.updateOrder(ref, { status: 'REJECTED', reason: c.reason }); return { ok: false, reason: c.reason }; }
+    if (c.dealStatus !== 'ACCEPTED') { await this.store.updateOrder(ref, { status: 'REJECTED', reason: c.reason }); await this.store.audit('IG_REJECTED', c); return { ok: false, reason: c.reason, confirm: c }; }
     const pos = { dealId: c.dealId, dealReference: ref, epic: order.epic, pair: order.pair, direction: c.direction, size: c.size,
       openLevel: c.level, stopLevel: c.stopLevel ?? null, limitLevel: c.limitLevel ?? null, status: 'OPEN', source: 'BOT', openedAt: new Date() };
     await this.store.upsertPosition(pos);

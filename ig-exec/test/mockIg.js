@@ -15,7 +15,7 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
         const c = s.confirms.get(req.url.split('/')[2]);
         return c ? send(200, c) : send(404, { errorCode: 'error.confirms.deal-not-found' });
       }
-      if (req.method === 'GET' && req.url.startsWith('/markets/')) return send(200, { snapshot: { bid: s.bid, offer: s.offer, marketStatus: 'TRADEABLE' }, dealingRules: { minDealSize: { value: 0.5 } } });
+      if (req.method === 'GET' && req.url.startsWith('/markets/')) return send(200, { instrument: { currencies: [{ code: 'USD', isDefault: false }] }, snapshot: { bid: s.bid, offer: s.offer, marketStatus: 'TRADEABLE' }, dealingRules: { minDealSize: { value: 0.5 } } });
       if (req.method === 'PUT' && req.url.startsWith('/positions/otc/')) {
         const p = s.positions.get(req.url.split('/')[3]); Object.assign(p.position, { stopLevel: body.stopLevel, limitLevel: body.limitLevel });
         return send(200, { dealReference: 'EDIT' + ++s.seq });
@@ -29,7 +29,7 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
           s.confirms.set(ref, { dealStatus: 'ACCEPTED', reason: 'SUCCESS', dealId: body.dealId, level, direction: body.direction, size: body.size });
           return send(200, { dealReference: ref });
         }
-        s.createCalls++;
+        s.createCalls++; s.lastCreate = body;
         if (s.confirms.has(body.dealReference)) return send(400, { errorCode: 'error.public-api.duplicate-deal-reference' });
         const buy = body.direction === 'BUY'; const level = buy ? s.offer : s.bid; const dealId = 'DIAAA' + ++s.seq;
         const stopLevel = +(buy ? level - body.stopDistance * 1e-4 : level + body.stopDistance * 1e-4).toFixed(5);

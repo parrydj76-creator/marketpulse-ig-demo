@@ -29,13 +29,15 @@ const results = []; const check = (name, ok, detail) => { results.push(ok); cons
     currencies: m.instrument?.currencies, minDealSize: m.dealingRules?.minDealSize, minNormalStopOrLimitDistance: m.dealingRules?.minNormalStopOrLimitDistance,
     minStepDistance: m.dealingRules?.minStepDistance }, null, 2));
   check('Market is tradeable', m.snapshot?.marketStatus === 'TRADEABLE', m.snapshot?.marketStatus);
-  check('Size >= broker minDealSize', SIZE >= Number(m.dealingRules?.minDealSize?.value || 0), { SIZE, min: m.dealingRules?.minDealSize?.value });
+  const minSize = Number(m.dealingRules?.minDealSize?.value || 0);
+  check('Size >= broker minDealSize', SIZE >= minSize, { SIZE, min: minSize });
+  if (SIZE < minSize) throw new Error(`IG_EXEC_SIZE=${SIZE} is below IG's minimum ${minSize}. Re-run with IG_EXEC_SIZE=${minSize}`);
   await store.setState('risk', { cooldownMinutes: 0, maxOrdersPerDay: 10, maxOrdersPerHour: 10, maxSizePerTrade: SIZE, minSize: 0.01, maxTotalSize: SIZE * 2, maxOpenPositions: 2 });
 
   // ---- Lifecycle 1: open -> verify -> duplicate -> restart -> normal close
   const sig = { id: 'acc-1-' + Date.now(), epic: EPIC, direction: 'BUY', stopPips: STOP, targetPips: LIMIT, size: SIZE };
   const open = await engine.executeSignal(sig);
-  check('1. Order opened and CONFIRMED by IG', open.ok === true, open.ok ? { dealId: open.dealId, level: open.position.openLevel } : open);
+  check('1. Order opened and CONFIRMED by IG', open.ok === true, open.ok ? { dealId: open.dealId, level: open.position.openLevel } : { reason: open.reason, ig: open.confirm });
   if (!open.ok) throw new Error('cannot continue: ' + JSON.stringify(open));
   const p = open.position;
   check('2. Broker-side stop AND limit attached', p.stopLevel != null && p.limitLevel != null, { stop: p.stopLevel, limit: p.limitLevel });
