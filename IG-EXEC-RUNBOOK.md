@@ -55,3 +55,9 @@ Step 0 passes; ≥4 weeks and ≥100 broker-side demo trades; zero unreconciled/
 and slippage still positive (not just paper P&L); kill switch tested on a phone. Even then, the demo only proves the plumbing works, not that the strategy makes money
 (a simple 5-min RSI/EMA rule; the repo has no evidence of an edge), and IG's own risk warning says most retail CFD accounts lose money. If you get there, start with a
 size you'd be happy to lose entirely. I can then add a separate hardened live profile (own account allow-list, tiny size cap, tighter loss limit, second explicit switch).
+
+## Findings from the first real DEMO run (EURUSD CFD, 26 Nov 2026)
+- IG minimum deal size = **1** (1 contract = 100,000 units, about $10 per pip). `IG_EXEC_SIZE` must be >= 1; the engine now refuses smaller sizes locally.
+- At size 1 a 12-pip stop risks about $120 (about £90), a 18-pip target is worth about $180, and the quoted spread was about 0.9 pip. The paper engine assumes £25 risk, so paper P&L understates demo (and any live) money at risk by roughly 3.5x.
+- Set `IG_PIP_VALUE_GBP=7.6` (about $10 / GBPUSD 1.31) so estimated P&L and the daily loss limit are on the right scale. With the default of 1 the loss limit would be ~7x too lenient.
+- With the default £50 daily loss limit, one stop-out ends trading for the day. That is intentional.
