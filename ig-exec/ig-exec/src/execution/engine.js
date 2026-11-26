@@ -42,7 +42,10 @@ class ExecutionEngine {
     const c = this._rc.get(epic);
     if (c && Date.now() - c.at < 600000) return c.rules;
     const m = await this.ig.market(epic);
-    const rules = { status: m.snapshot?.marketStatus, minSize: Number(m.dealingRules?.minDealSize?.value || 0),
+    // IG only accepts a currency from the market's own list. Prefer GBP if offered, else the default, else the first.
+    const cur = m.instrument?.currencies || [];
+    const currency = cur.find((x) => x.code === 'GBP')?.code || cur.find((x) => x.isDefault)?.code || cur[0]?.code || 'GBP';
+    const rules = { currency, status: m.snapshot?.marketStatus, minSize: Number(m.dealingRules?.minDealSize?.value || 0),
       minDist: Number(m.dealingRules?.minNormalStopOrLimitDistance?.value || 0) };
     this._rc.set(epic, { at: Date.now(), rules });
     return rules;
@@ -93,7 +96,7 @@ class ExecutionEngine {
 
     await this.store.updateOrder(ref, { status: 'SUBMITTING' }); // persisted BEFORE the network call
     try {
-      await this.ig.openPosition({ epic, expiry: '-', direction: sig.direction, size: v.size, orderType: 'MARKET', currencyCode: 'GBP',
+      await this.ig.openPosition({ epic, expiry: '-', direction: sig.direction, size: v.size, orderType: 'MARKET', currencyCode: rules.currency,
         forceOpen: true, guaranteedStop: false, stopDistance: sig.stopPips,
         ...(sig.targetPips ? { limitDistance: sig.targetPips } : {}), dealReference: ref });
     } catch (e) {

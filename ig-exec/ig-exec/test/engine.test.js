@@ -193,3 +193,11 @@ test('IG minimum size is enforced before any order is sent', async () => {
   assert.equal(mock.createCalls, 0);
   await mock.stop();
 });
+
+test('currencyCode comes from the market list (USD-only market is not sent GBP)', async () => {
+  const { mock, engine } = await setup();
+  const r = await engine.executeSignal(sig('cur'));
+  assert.equal(r.ok, true);
+  assert.equal(mock.lastCreate.currencyCode, 'USD');
+  await mock.stop();
+});
