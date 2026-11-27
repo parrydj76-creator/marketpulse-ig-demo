@@ -79,6 +79,15 @@ class IgClient {
   editPosition(id, b) { return this.request('PUT', `/positions/otc/${id}`, { version: 2, body: b }); }
   confirm(ref) { return this.request('GET', `/confirms/${ref}`, { version: 1 }); }
   async positions() { return (await this.request('GET', '/positions', { version: 2 })).positions || []; }
+  async transactions(from, to) {   // v2 history; dates are naive UTC 'YYYY-MM-DDTHH:mm:ss'
+    const out = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await this.request('GET', `/history/transactions?type=ALL_DEAL&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&pageSize=100&pageNumber=${page}`, { version: 2 });
+      out.push(...(r.transactions || []));
+      if (page >= (r.metadata?.pageData?.totalPages || 1)) break;
+    }
+    return out;
+  }
   market(epic) { return this.request('GET', `/markets/${epic}`, { version: 3 }); }
 }
 module.exports = { IgClient, IgError };
