@@ -93,3 +93,9 @@ Max 30 non-critical alerts/hour. If you stop receiving the daily summary on a we
 
 **Also changed:** the paper engine now carries score/RSI/EMA/spread on each plan (additive only; signals unchanged), `server.js` mounts the existing `/api/push/*` subscription routes
 (they were not mounted before), and `public/sw.js` uses a per-message tag so a "closed" alert does not replace an "opened" one.
+
+## Real IG transaction format (captured 27 Nov 2026) and pip value
+IG reports `size` with a sign ("+1" = BUY, "-1" = SELL) and names the instrument like "EUR/USD converted at 0.76798". The matcher handles both.
+IG booked -£5.38 for a -0.7 pip round trip and -£7.68 for -1.0 pip: **about £7.68 per pip at size 1** (= $10 x the USD->GBP rate IG applied, 0.768). It moves with GBP/USD,
+so set `IG_PIP_VALUE_GBP=7.68`; estimates are replaced by IG's exact figures within about 5 minutes anyway.
+Observed cost of a round trip at size 1 with a ~1 pip spread: about £5-8.

@@ -314,7 +314,7 @@ async function pollRest(){
     }
    }
   }
- }finally{restPolling=false;await tradingCycle();restState.nextPoll=new Date(Math.max(Date.now()+REST_POLL_SECONDS*1000,restBackoffUntil)).toISOString()}
+ }finally{restPolling=false;if(typeof tradingCycle==='function')await tradingCycle();restState.nextPoll=new Date(Math.max(Date.now()+REST_POLL_SECONDS*1000,restBackoffUntil)).toISOString()}
 }
 function startRestPolling(){
  if(restTimer)clearInterval(restTimer);
