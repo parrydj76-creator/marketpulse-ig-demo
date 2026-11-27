@@ -17,7 +17,7 @@ const results = []; const check = (name, ok, detail) => { results.push(ok); cons
   assertDemoConfig(process.env);
   const ig = new IgClient({ baseUrl: (process.env.NODE_ENV === 'test' && process.env.IG_TEST_BASE_URL) || 'https://demo-api.ig.com/gateway/deal', apiKey: process.env.IG_API_KEY, identifier: process.env.IG_USERNAME, password: process.env.IG_PASSWORD, accountId: process.env.IG_DEMO_ACCOUNT_ID });
   const store = new MemStore();
-  const mk = () => new ExecutionEngine({ ig, store, allowedEpics: [EPIC], armed: true, pipValueGbp: Number(process.env.IG_PIP_VALUE_GBP) || 1 });
+  const mk = () => new ExecutionEngine({ ig, store, allowedEpics: [EPIC], armed: true, pnlSyncMinAgeMs: 0, pipValueGbp: Number(process.env.IG_PIP_VALUE_GBP) || 1 });
   let engine = mk();
   await engine.init(); await engine.resume();
   check('Logged in to DEMO, account matches whitelist', ig.accountId === process.env.IG_DEMO_ACCOUNT_ID, { account: ig.accountId, lightstreamer: ig.lsEndpoint });
@@ -59,6 +59,22 @@ const results = []; const check = (name, ok, detail) => { results.push(ok); cons
   const k = await engine.kill({ closeAll: true, reason: 'acceptance' });
   check('10. KILL SWITCH closed the open position at broker', k.errors.length === 0 && (await ig.positions()).every((x) => x.position.dealId !== o2.dealId), k);
   check('11. Orders blocked while killed', (await engine.executeSignal({ ...sig, id: 'acc-3-' + Date.now() })).reason === 'KILL_SWITCH');
+
+  // ---- Observability: spread/slippage captured, and IG's own booked P&L matched to our trades
+  const ords = await store.listAllOrders();
+  check('12. Spread and slippage captured on orders', ords.filter((o) => o.status === 'FILLED').every((o) => o.spreadPips != null && o.slippagePips != null), ords.map((o) => ({ spread: o.spreadPips, slip: o.slippagePips })));
+  let synced = { matched: 0 };
+  for (let i = 0; i < 7 && synced.matched < 2; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 10000));          // IG can take a few seconds to book a deal into history
+    const r = await engine.syncPnl(); synced = { matched: (synced.matched || 0) + r.matched, pending: r.pending };
+  }
+  check('13. Exact P&L matched from IG transaction history (both trades)', synced.matched >= 2, synced);
+  if (synced.matched < 2) {
+    const raw = await ig.transactions(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 19), new Date(Date.now() + 3600e3).toISOString().slice(0, 19));
+    console.log('RAW IG TRANSACTIONS (send me this if check 13 failed):', JSON.stringify(raw.slice(0, 6), null, 2));
+  }
+  const exact = await store.listClosed();
+  console.log('EXACT vs ESTIMATE:', JSON.stringify(exact.map((p) => ({ dealId: p.dealId, pnlGbp: p.pnlGbp, estimate: p.pnlEstimateGbp, exact: p.pnlEstimated === false }))));
   engine.stop();
 
   console.log('\nCLOSED TRADE RECORDS:', JSON.stringify(await store.listPositions('CLOSED'), null, 2));
