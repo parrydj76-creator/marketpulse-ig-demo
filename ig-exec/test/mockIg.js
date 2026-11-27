@@ -2,7 +2,14 @@
 const http = require('http');
 
 function createMockIg({ accountId = 'DEMO1' } = {}) {
-  const s = { positions: new Map(), confirms: new Map(), createCalls: 0, closeCalls: 0, dropNextCreateResponse: false, seq: 0, bid: 1.25, offer: 1.2502, accountId };
+  const s = { slip: 0, pipValue: 7.6, transactions: [], meta: new Map(), positions: new Map(), confirms: new Map(), createCalls: 0, closeCalls: 0, dropNextCreateResponse: false, seq: 0, bid: 1.25, offer: 1.2502, accountId };
+  const naive = (ms) => new Date(ms).toISOString().slice(0, 19);
+  s.book = (dealId, closeLevel) => {
+    const p = s.positions.get(dealId), m = s.meta.get(dealId), pos = p.position, buy = pos.direction === 'BUY';
+    const pips = ((closeLevel - pos.level) / 1e-4) * (buy ? 1 : -1), pnl = pips * pos.size * s.pipValue, pair = p.market.epic.split('.')[2];
+    s.transactions.push({ dateUtc: naive(Date.now()), openDateUtc: naive(m.openedMs), instrumentName: pair.slice(0, 3) + '/' + pair.slice(3), period: '-', transactionType: 'DEAL',
+      profitAndLoss: '£' + pnl.toFixed(2), reference: 'R' + dealId.slice(-6), openLevel: String(pos.level), closeLevel: String(closeLevel), size: String(pos.size), currency: '£' });
+  };
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', (c) => (raw += c));
     req.on('end', () => {
@@ -15,6 +22,7 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
         const c = s.confirms.get(req.url.split('/')[2]);
         return c ? send(200, c) : send(404, { errorCode: 'error.confirms.deal-not-found' });
       }
+      if (req.method === 'GET' && req.url.startsWith('/history/transactions')) return send(200, { transactions: s.transactions, metadata: { pageData: { totalPages: 1 } } });
       if (req.method === 'GET' && req.url.startsWith('/markets/')) return send(200, { instrument: { currencies: [{ code: 'USD', isDefault: false }] }, snapshot: { bid: s.bid, offer: s.offer, marketStatus: 'TRADEABLE' }, dealingRules: { minDealSize: { value: 0.5 } } });
       if (req.method === 'PUT' && req.url.startsWith('/positions/otc/')) {
         const p = s.positions.get(req.url.split('/')[3]); Object.assign(p.position, { stopLevel: body.stopLevel, limitLevel: body.limitLevel });
@@ -24,16 +32,17 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
         if (req.headers._method === 'DELETE') {
           s.closeCalls++;
           const p = s.positions.get(body.dealId); if (!p) return send(404, { errorCode: 'error.position.notfound' });
-          s.positions.delete(body.dealId);
           const ref = 'CLOSE' + ++s.seq; const level = p.position.direction === 'BUY' ? s.bid : s.offer;
+          s.book(body.dealId, level); s.positions.delete(body.dealId);
           s.confirms.set(ref, { dealStatus: 'ACCEPTED', reason: 'SUCCESS', dealId: body.dealId, level, direction: body.direction, size: body.size });
           return send(200, { dealReference: ref });
         }
         s.createCalls++; s.lastCreate = body;
         if (s.confirms.has(body.dealReference)) return send(400, { errorCode: 'error.public-api.duplicate-deal-reference' });
-        const buy = body.direction === 'BUY'; const level = buy ? s.offer : s.bid; const dealId = 'DIAAA' + ++s.seq;
+        const buy = body.direction === 'BUY'; const level = +(buy ? s.offer + s.slip * 1e-4 : s.bid - s.slip * 1e-4).toFixed(5); const dealId = 'DIAAA' + ++s.seq;
         const stopLevel = +(buy ? level - body.stopDistance * 1e-4 : level + body.stopDistance * 1e-4).toFixed(5);
         const limitLevel = body.limitDistance ? +(buy ? level + body.limitDistance * 1e-4 : level - body.limitDistance * 1e-4).toFixed(5) : null;
+        s.meta.set(dealId, { openedMs: Date.now() });
         s.positions.set(dealId, { position: { dealId, dealReference: body.dealReference, direction: body.direction, size: body.size, level, stopLevel, limitLevel, createdDateUTC: new Date().toISOString() }, market: { epic: body.epic } });
         s.confirms.set(body.dealReference, { dealStatus: 'ACCEPTED', reason: 'SUCCESS', dealId, level, direction: body.direction, size: body.size, stopLevel, limitLevel, epic: body.epic });
         if (s.dropNextCreateResponse) { s.dropNextCreateResponse = false; return req.socket.destroy(); }
@@ -42,7 +51,7 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
       send(404, { errorCode: 'mock.unhandled' });
     });
   });
-  s.brokerClose = (dealId) => s.positions.delete(dealId);   // simulates a stop/limit being hit
+  s.brokerClose = (dealId, level) => { const p = s.positions.get(dealId); s.book(dealId, level ?? p.position.stopLevel); s.positions.delete(dealId); };   // simulates a stop/limit being hit
   s.start = () => new Promise((r) => server.listen(0, '127.0.0.1', () => { s.url = `http://127.0.0.1:${server.address().port}`; r(s); }));
   s.stop = () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
   return s;
