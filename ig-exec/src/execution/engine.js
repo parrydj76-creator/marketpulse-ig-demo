@@ -8,47 +8,52 @@ const opposite = (d) => (d === 'BUY' ? 'SELL' : 'BUY');
 const dealRef = (id) => 'MP' + crypto.createHash('sha1').update(String(id)).digest('hex').slice(0, 24); // deterministic, <=30 chars
 
 class ExecutionEngine {
-  constructor({ ig, store, epicMap = {}, allowedEpics, pipValueGbp = 1, armed = false, pollMs = 15000, confirmRetries = 8, confirmDelayMs = 500, unresolvedGraceMs = 120000, logger = console }) {
-    Object.assign(this, { ig, store, epicMap, pipValueGbp, armed, pollMs, confirmRetries, confirmDelayMs, unresolvedGraceMs, log: logger });
+  constructor({ ig, store, epicMap = {}, allowedEpics, pipValueGbp = 1, notify = null, pnlSyncMinAgeMs = 60000, armed = false, pollMs = 15000, confirmRetries = 8, confirmDelayMs = 500, unresolvedGraceMs = 120000, logger = console }) {
+    Object.assign(this, { ig, store, epicMap, pipValueGbp, notify, pnlSyncMinAgeMs, armed, pollMs, confirmRetries, confirmDelayMs, unresolvedGraceMs, log: logger });
     this.allowedEpics = new Set(allowedEpics || Object.values(epicMap));
     this.killed = true;        // fail-safe until state is loaded
+    this._lastSync = 0; this._syncResult = null; this._lossDay = '';
     this.degraded = false; this.failures = 0; this._chain = Promise.resolve(); this._timer = null;
   }
+
+  // Alerts must never affect trading: swallow everything.
+  _notify(type, data) { try { const p = this.notify && this.notify(type, data); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ } }
 
   // ---------- lifecycle ----------
   async init() {
     try { const k = await this.store.getState('kill'); this.killed = !k || !!k.on; } catch { this.killed = true; }  // never-resumed = killed
     await this.ig.login();
     await this.reconcile();             // restart recovery
+    this._notify('STARTED', { killed: this.killed });
   }
   start() {
     this._timer = setInterval(async () => {
-      try { await this.reconcile(); this.failures = 0; this.degraded = false; }
-      catch (e) { this.log.error('[exec] reconcile failed', e.message); if (++this.failures >= 5) this.degraded = true; }
+      try { await this.reconcile(); if (this.degraded) this._notify('RECOVERED', {}); this.failures = 0; this.degraded = false; }
+      catch (e) {
+        this.log.error('[exec] reconcile failed', e.message);
+        if (++this.failures >= 5 && !this.degraded) { this.degraded = true; this._notify('DEGRADED', { error: e.message }); }
+      }
+      if (Date.now() - this._lastSync > 300000) { this._lastSync = Date.now(); this.syncPnl().catch((e) => this.log.error('[exec] pnl sync failed', e.message)); }
     }, this.pollMs);
     this._timer.unref?.();
   }
   stop() { clearInterval(this._timer); }
+  async syncPnl() { this._syncResult = { at: new Date().toISOString(), ...(await require('./pnlsync').syncExactPnl(this)) }; return this._syncResult; }
   _lock(fn) { const run = this._chain.then(fn, fn); this._chain = run.catch(() => {}); return run; }
   async _cfg() { return { ...DEFAULT_RISK, ...((await this.store.getState('risk')) || {}) }; }
   async status() {
     return { armed: this.armed, killed: this.killed, allowedEpics: [...this.allowedEpics], degraded: this.degraded, account: this.ig.accountId,
-      risk: await this._cfg(), openPositions: await this.store.listPositions('OPEN') };
+      risk: await this._cfg(), pnlSync: this._syncResult, openPositions: await this.store.listPositions('OPEN') };
   }
 
-  // IG dealing rules (min size, min stop/limit distance, market status), cached 10 min. Unknown rules = no trade.
+  // Fresh IG dealing rules + live quote for every order (orders are rare). Unknown rules = no trade.
   async _rules(epic) {
-    this._rc = this._rc || new Map();
-    const c = this._rc.get(epic);
-    if (c && Date.now() - c.at < 600000) return c.rules;
     const m = await this.ig.market(epic);
     // IG only accepts a currency from the market's own list. Prefer GBP if offered, else the default, else the first.
     const cur = m.instrument?.currencies || [];
     const currency = cur.find((x) => x.code === 'GBP')?.code || cur.find((x) => x.isDefault)?.code || cur[0]?.code || 'GBP';
-    const rules = { currency, status: m.snapshot?.marketStatus, minSize: Number(m.dealingRules?.minDealSize?.value || 0),
-      minDist: Number(m.dealingRules?.minNormalStopOrLimitDistance?.value || 0) };
-    this._rc.set(epic, { at: Date.now(), rules });
-    return rules;
+    return { currency, status: m.snapshot?.marketStatus, minSize: Number(m.dealingRules?.minDealSize?.value || 0),
+      minDist: Number(m.dealingRules?.minNormalStopOrLimitDistance?.value || 0), bid: m.snapshot?.bid, offer: m.snapshot?.offer };
   }
 
   // ---------- opening ----------
@@ -82,9 +87,13 @@ class ExecutionEngine {
     if (v.size < rules.minSize) return this._reject(sig, `SIZE_BELOW_BROKER_MIN(${rules.minSize})`);
     if (sig.stopPips < rules.minDist || (sig.targetPips && sig.targetPips < rules.minDist)) return this._reject(sig, `DISTANCE_BELOW_BROKER_MIN(${rules.minDist})`);
 
+    const pip = pipSizeOf(pairOf(epic));
+    const quoteLevel = sig.direction === 'BUY' ? rules.offer : rules.bid;
+    const spreadPips = Number.isFinite(rules.offer - rules.bid) ? +((rules.offer - rules.bid) / pip).toFixed(2) : null;
     // Duplicate prevention #1: idempotency key unique in DB (same signal can never create two orders).
     const ins = await this.store.insertOrder({ idemKey: String(sig.id), dealReference: ref, epic, pair: sig.pair || pairOf(epic), direction: sig.direction,
-      size: v.size, stopDistance: sig.stopPips, limitDistance: sig.targetPips || null, status: 'PENDING', signal: sig });
+      size: v.size, stopDistance: sig.stopPips, limitDistance: sig.targetPips || null, status: 'PENDING', signal: sig,
+      quoteLevel: Number.isFinite(quoteLevel) ? quoteLevel : null, spreadPips, context: sig.context ?? null });
     if (!ins.inserted) return { ok: false, reason: 'DUPLICATE_SIGNAL', order: ins.row };
 
     // Duplicate prevention #2: broker truth, not just local state.
@@ -100,7 +109,7 @@ class ExecutionEngine {
         forceOpen: true, guaranteedStop: false, stopDistance: sig.stopPips,
         ...(sig.targetPips ? { limitDistance: sig.targetPips } : {}), dealReference: ref });
     } catch (e) {
-      if (!e.ambiguous) { await this.store.updateOrder(ref, { status: 'REJECTED', reason: e.code || e.message }); return { ok: false, reason: e.code || e.message }; }
+      if (!e.ambiguous) { await this.store.updateOrder(ref, { status: 'REJECTED', reason: e.code || e.message }); this._notify('REJECTED', { reason: e.code || e.message, order: await this.store.getOrder(ref) }); return { ok: false, reason: e.code || e.message }; }
       await this.store.updateOrder(ref, { status: 'UNKNOWN', reason: e.message });   // NEVER resend; resolve by reference
     }
     return this._resolveOrder(ref, this.confirmRetries);
@@ -119,12 +128,14 @@ class ExecutionEngine {
     if (['FILLED', 'REJECTED', 'FAILED'].includes(order.status)) return { ok: order.status === 'FILLED', order };
     const c = await this._confirmLoop(ref, retries);
     if (!c) return { ok: false, pending: true, reason: 'UNRESOLVED', order };
-    if (c.dealStatus !== 'ACCEPTED') { await this.store.updateOrder(ref, { status: 'REJECTED', reason: c.reason }); await this.store.audit('IG_REJECTED', c); return { ok: false, reason: c.reason, confirm: c }; }
+    if (c.dealStatus !== 'ACCEPTED') { await this.store.updateOrder(ref, { status: 'REJECTED', reason: c.reason }); await this.store.audit('IG_REJECTED', c); this._notify('REJECTED', { reason: c.reason, order }); return { ok: false, reason: c.reason, confirm: c }; }
     const pos = { dealId: c.dealId, dealReference: ref, epic: order.epic, pair: order.pair, direction: c.direction, size: c.size,
       openLevel: c.level, stopLevel: c.stopLevel ?? null, limitLevel: c.limitLevel ?? null, status: 'OPEN', source: 'BOT', openedAt: new Date() };
     await this.store.upsertPosition(pos);
-    await this.store.updateOrder(ref, { status: 'FILLED', dealId: c.dealId, level: c.level });
+    const slip = order.quoteLevel != null ? +(((c.level - order.quoteLevel) / pipSizeOf(order.pair)) * (c.direction === 'BUY' ? 1 : -1)).toFixed(2) : null;
+    await this.store.updateOrder(ref, { status: 'FILLED', dealId: c.dealId, level: c.level, slippagePips: slip });
     await this.store.audit('FILLED', { ref, dealId: c.dealId });
+    this._notify('FILLED', { pos, order, slippagePips: slip });
     const cfg = await this._cfg();
     if (cfg.requireBrokerStop && pos.stopLevel == null) await this._protect(pos, order);
     return { ok: true, dealId: c.dealId, position: await this.store.getPosition(c.dealId) };
@@ -160,8 +171,9 @@ class ExecutionEngine {
   async _markClosed(pos, level, reason, estimated = true) {
     let pnl = null;
     if (level != null) pnl = +(((pos.direction === 'BUY' ? level - pos.openLevel : pos.openLevel - level) / pipSizeOf(pos.pair)) * pos.size * this.pipValueGbp).toFixed(2);
-    await this.store.upsertPosition({ dealId: pos.dealId, status: 'CLOSED', closedAt: new Date(), closeLevel: level, closeReason: reason, pnlGbp: pnl, pnlEstimated: true });
+    await this.store.upsertPosition({ dealId: pos.dealId, status: 'CLOSED', closedAt: new Date(), closeLevel: level, closeReason: reason, pnlGbp: pnl, pnlEstimated: true, pnlEstimateGbp: pnl });
     await this.store.audit('CLOSED', { dealId: pos.dealId, reason, level, pnl });
+    this._notify('CLOSED', { pos, level, reason, pnl });
   }
 
   // ---------- kill switch ----------
@@ -174,9 +186,10 @@ class ExecutionEngine {
         try { await this._close(p.dealId, 'KILL_SWITCH'); closed.push(p.dealId); } catch (e) { errors.push({ dealId: p.dealId, error: e.message }); }
       }
     });
+    this._notify('KILL', { reason, closed, errors });
     return { killed: true, closed, errors };
   }
-  async resume() { await this.store.setState('kill', { on: false, ts: new Date().toISOString() }); this.killed = false; return { killed: false }; }
+  async resume() { await this.store.setState('kill', { on: false, ts: new Date().toISOString() }); this.killed = false; this._notify('RESUMED', {}); return { killed: false }; }
 
   // ---------- reconciliation / restart recovery ----------
   reconcile() { return this._lock(() => this._reconcile()); }
@@ -187,6 +200,7 @@ class ExecutionEngine {
       const r = await this._resolveOrder(o.dealReference, 1);
       if (r.pending && Date.now() - new Date(o.createdAt).getTime() > this.unresolvedGraceMs) {
         await this.store.updateOrder(o.dealReference, { status: 'FAILED', reason: 'NOT_FOUND_AT_BROKER' });
+        this._notify('ORDER_FAILED', { ref: o.dealReference, reason: 'NOT_FOUND_AT_BROKER' });
       }
     }
     for (const o of await this.store.listOrders(['PENDING'])) {
@@ -217,6 +231,7 @@ class ExecutionEngine {
       await this.store.upsertPosition({ dealId, dealReference: p.dealReference, epic: x.market.epic, pair: pairOf(x.market.epic),
         direction: p.direction, size: p.size, openLevel: p.level, stopLevel: p.stopLevel ?? null, limitLevel: p.limitLevel ?? null, status: 'OPEN', source: 'ADOPTED', openedAt: new Date(p.createdDateUTC || Date.now()) });
       await this.store.audit('ADOPTED', { dealId });
+      this._notify('ADOPTED', { dealId, epic: x.market.epic, direction: p.direction, size: p.size, stopLevel: p.stopLevel });
       if (cfg.requireBrokerStop && p.stopLevel == null) await this._close(dealId, 'NO_BROKER_STOP');
     }
     return { live: live.length, local: (await this.store.listPositions('OPEN')).length };
@@ -235,6 +250,13 @@ class ExecutionEngine {
   // Lightstreamer TRADE:<accountId> (CONFIRMS/OPU) updates → prompt reconciliation instead of waiting for the poll.
   handleTradeUpdate() { clearTimeout(this._deb); this._deb = setTimeout(() => this.reconcile().catch((e) => this.log.error(e.message)), 500); }
 
-  _reject(sig, reason) { this.store.audit('REJECTED', { signal: sig.id, reason }).catch(() => {}); return { ok: false, reason }; }
+  _reject(sig, reason) {
+    this.store.audit('REJECTED', { signal: sig.id, reason }).catch(() => {});
+    if (reason !== 'EXECUTION_DISABLED') {
+      const day = new Date().toISOString().slice(0, 10);
+      if (reason !== 'DAILY_LOSS_LIMIT' || this._lossDay !== day) { if (reason === 'DAILY_LOSS_LIMIT') this._lossDay = day; this._notify('SIGNAL_SKIPPED', { sig, reason }); }
+    }
+    return { ok: false, reason };
+  }
 }
 module.exports = { ExecutionEngine, dealRef };
