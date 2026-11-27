@@ -24,7 +24,9 @@ function matchTx(pos, txs, used) {
     if (used.has(t)) continue;
     if (t.transactionType && !/DEAL/i.test(t.transactionType)) continue;
     if (!String(t.instrumentName || '').replace(/\s/g, '').toUpperCase().includes(name)) continue;
-    if (Math.abs(Number(t.size) - Number(pos.size)) > 1e-9) continue;
+    const sz = String(t.size).trim();                      // IG: "+1" = BUY position, "-1" = SELL position
+    if (Math.abs(Math.abs(Number(sz)) - Number(pos.size)) > 1e-9) continue;
+    if (/^[+-]/.test(sz) && (sz[0] === '+') !== (pos.direction === 'BUY')) continue;
     if (Math.abs(Number(t.openLevel) - Number(pos.openLevel)) > tol) continue;
     let dt; const openMs = toMs(t.openDateUtc);
     if (Number.isFinite(openMs)) { dt = Math.abs(openMs - posOpen); if (dt > 180000) continue; }
