@@ -1,1 +1,1 @@
-{ "name": "ig-exec", "private": true, "scripts": { "test": "NODE_ENV=test node --test --test-timeout=8000 test/engine.test.js" } }
+{ "name": "ig-exec", "private": true, "scripts": { "test": "NODE_ENV=test node --test --test-timeout=8000 test/engine.test.js test/obs.test.js" } }

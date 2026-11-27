@@ -73,3 +73,29 @@ Observed round-trip cost at size 1: about 0.8 pip (about £6). With a 12-pip sto
 3. Shell: `cd ig-exec && node scripts/pg-smoke.js` must print `PG SMOKE TEST PASSED` (tests every database call; cleans up after itself).
 4. Start the paper simulation in the existing dashboard. It needs 30 consecutive 5-minute bars (about 2.5 hours) after EVERY restart/deploy before it can signal.
 5. Press Resume on /ig-exec.html. FX is closed from Friday ~22:00 to Sunday ~22:00 UK time.
+
+## Results report, exact P&L and alerts (added after the first live trade)
+**Exact P&L.** Every 5 minutes the engine matches closed trades to IG's own transaction history (instrument + size + open level + open time) and replaces the
+estimate with IG's booked figure. The original estimate is kept, so the report can tell you the true `IG_PIP_VALUE_GBP`. Stop-outs are relabelled `BROKER_STOP` / `BROKER_LIMIT`.
+Run manually: Results report page -> "Sync exact P&L from IG", or `POST /api/admin/ig-exec/pnl-sync`. If trades stay "estimated", run
+`cd ig-exec && node scripts/demo-acceptance.js` (check 13 prints IG's raw transactions) and send me that output.
+
+**Captured per trade:** quote at decision time, spread, slippage, and signal context (score, RSI, EMA9/21, paper spread, signal-to-order delay).
+
+**Report** (`/ig-report.html`, or `GET /api/admin/ig-exec/report`; `trades.csv` for your own analysis): win rate with 95% range vs break-even win rate, average win/loss,
+profit factor, expectancy, spread and slippage costs, results by exit type / hour / direction, paper-vs-broker gap, and a plain verdict that stays "too few trades" until n >= 30
+and only makes a call at n >= 100.
+
+**Alerts.** Opened, closed (with P&L), kill switch on/off, signal skipped (with reason), IG rejection, unexpected position at IG, engine degraded/recovered, order outcome unknown,
+engine started, plus a weekday summary at 21:00 UTC. Setup: generate VAPID keys, set the 4 env vars in `render.env.example`, deploy, open `/ig-exec.html` on your phone
+(iPhone: add to Home Screen first), enter PUSH_PAIRING_TOKEN, "Enable alerts on this device", then "Send test IG alert".
+Max 30 non-critical alerts/hour. If you stop receiving the daily summary on a weekday, the app is down: check Render.
+
+**Also changed:** the paper engine now carries score/RSI/EMA/spread on each plan (additive only; signals unchanged), `server.js` mounts the existing `/api/push/*` subscription routes
+(they were not mounted before), and `public/sw.js` uses a per-message tag so a "closed" alert does not replace an "opened" one.
+
+## Real IG transaction format (captured 27 Nov 2026) and pip value
+IG reports `size` with a sign ("+1" = BUY, "-1" = SELL) and names the instrument like "EUR/USD converted at 0.76798". The matcher handles both.
+IG booked -£5.38 for a -0.7 pip round trip and -£7.68 for -1.0 pip: **about £7.68 per pip at size 1** (= $10 x the USD->GBP rate IG applied, 0.768). It moves with GBP/USD,
+so set `IG_PIP_VALUE_GBP=7.68`; estimates are replaced by IG's exact figures within about 5 minutes anyway.
+Observed cost of a round trip at size 1 with a ~1 pip spread: about £5-8.

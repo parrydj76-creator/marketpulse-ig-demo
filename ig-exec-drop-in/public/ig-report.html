@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IG DEMO results</title>
+<style>body{font:15px system-ui;margin:0;padding:16px;max-width:760px;margin:auto;background:#0f1115;color:#e8e8e8}
+h2,h3{margin:18px 0 6px}input{width:100%;padding:10px;box-sizing:border-box;border-radius:8px;border:1px solid #444;background:#1a1d24;color:#fff}
+button{font:inherit;padding:10px 14px;border-radius:8px;border:0;margin:6px 6px 6px 0;background:#333;color:#fff}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:6px 8px;border-bottom:1px solid #2a2e38;text-align:right}th:first-child,td:first-child{text-align:left}
+.v{background:#1a1d24;border-left:4px solid #f9a825;padding:10px 12px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.c{background:#1a1d24;border-radius:8px;padding:10px}.c b{display:block;font-size:20px}.c span{font-size:12px;color:#aaa}.neg{color:#ef5350}.pos{color:#66bb6a}.w{overflow-x:auto}</style></head><body>
+<h2>IG DEMO results</h2><p style="font-size:13px;color:#aaa">Demo account. Small samples are mostly luck: read the verdict line first.</p>
+<input id="t" type="password" placeholder="ADMIN_TOKEN">
+<button onclick="load()">Load report</button><button onclick="csv()">Download trades CSV</button><button onclick="sync()">Sync exact P&amp;L from IG</button><button onclick="location.href='/ig-exec.html'">Controls</button>
+<div id="out"></div>
+<script>
+const $=id=>document.getElementById(id);
+const H=()=>({'x-admin-token':$('t').value});
+const pct=x=>x==null?'–':(x*100).toFixed(0)+'%',gbp=x=>x==null?'–':(x<0?'-£':'£')+Math.abs(x).toFixed(2),num=x=>x==null?'–':String(x);
+function el(tag,txt,cls){const e=document.createElement(tag);if(txt!=null)e.textContent=txt;if(cls)e.className=cls;return e}
+function cards(items){const g=el('div',null,'grid');for(const[l,v,c]of items){const d=el('div',null,'c');d.append(el('b',v,c),el('span',l));g.append(d)}return g}
+function table(head,rows){const w=el('div',null,'w'),t=el('table');const tr=el('tr');head.forEach(h=>tr.append(el('th',h)));t.append(tr);
+ for(const r of rows){const x=el('tr');r.forEach(c=>x.append(el('td',c)));t.append(x)}w.append(t);return w}
+function groupRows(g,sortNum){return Object.entries(g||{}).sort((a,b)=>sortNum?a[0]-b[0]:a[0].localeCompare(b[0])).map(([k,v])=>[k,v.n,pct(v.wins/v.n),gbp(v.pnlGbp),gbp(v.avgPnlGbp)])}
+async function api(path,opt){const r=await fetch('/api/admin/ig-exec/'+path,{headers:H(),...opt});const ct=r.headers.get('content-type')||'';
+ if(!ct.includes('json')&&!ct.includes('csv'))throw Error('Server has no ig-exec routes (HTTP '+r.status+'): redeploy the latest bundle.');
+ if(r.status===401)throw Error('Admin token rejected.');if(r.status===503)throw Error('Execution not running: '+(await r.json()).reason);return r}
+async function load(){const o=$('out');o.textContent='Loading…';try{const R=await (await api('report')).json();o.textContent='';const s=R.overall,c=R.costs,q=R.pnlQuality,p=R.paperVsBroker,k=R.calibration;
+ o.append(el('h3','Verdict'),el('div',R.verdict,'v'));
+ o.append(el('h3','Overall (closed trades)'),cards([['Trades',s.n],['Win rate',pct(s.winRate)+' ('+pct(s.winRateCI95[0])+'–'+pct(s.winRateCI95[1])+')'],['Break-even win rate',pct(s.breakEvenWinRate)],
+  ['Total P&L',gbp(s.totalPnlGbp),s.totalPnlGbp<0?'neg':'pos'],['Expectancy / trade',gbp(s.expectancyGbp),s.expectancyGbp<0?'neg':'pos'],['Avg win',gbp(s.avgWinGbp)],['Avg loss',gbp(s.avgLossGbp)],['Profit factor',num(s.profitFactor)]]));
+ o.append(el('p','P&L quality: '+q.exactFromIG+' trade(s) confirmed from IG, '+q.estimatedOnly+' still estimated.'));
+ o.append(el('h3','Costs and execution'),cards([['Avg spread (pips)',num(c.avgSpreadPips)],['Avg slippage (pips, + = worse)',num(c.avgSlippagePips)],['Est. total spread cost',gbp(c.estSpreadCostGbp)],['Signal → order (s)',num(c.avgSignalToOrderSeconds)],['Avg hold (min)',num(c.avgHoldMinutes)]]));
+ o.append(el('h3','By exit type'),table(['Exit','Trades','Win','P&L','Avg'],groupRows(R.byExit)));
+ o.append(el('h3','By hour opened (UTC)'),table(['Hour','Trades','Win','P&L','Avg'],groupRows(R.byHourUtc,true)));
+ o.append(el('h3','By direction'),table(['Dir','Trades','Win','P&L','Avg'],groupRows(R.byDirection)));
+ o.append(el('h3','Paper vs broker'),cards([['Matched trades',p.matchedTrades],['Avg paper pips',num(p.avgPaperPips)],['Avg broker pips',num(p.avgBrokerPips)],['Gap (broker − paper)',num(p.avgGapPips)],['Paper trades not executed',p.paperTradesNotExecuted]]));
+ o.append(el('h3','P&L calibration'),el('p','Implied £ per pip per 1.0 size from IG-confirmed trades: '+gbp(k.impliedPipValueGbp)+' (from '+k.tradesUsed+' trade(s)). Your IG_PIP_VALUE_GBP setting should be close to this. Avg estimate error: '+gbp(k.avgEstimateErrorGbp)+'.'));
+}catch(e){o.textContent='Error: '+e.message}}
+async function csv(){try{const r=await api('trades.csv');const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ig-trades.csv';a.click()}catch(e){$('out').textContent='Error: '+e.message}}
+async function sync(){try{const r=await (await api('pnl-sync',{method:'POST'})).json();$('out').textContent='P&L sync: '+JSON.stringify(r)+'  (reload the report)'}catch(e){$('out').textContent='Error: '+e.message}}
+</script></body></html>

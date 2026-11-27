@@ -1,14 +1,17 @@
 'use strict';
 // Same interface, two backends. MemStore is for tests; PgStore for production.
-const ORDER_COLS = ['dealReference','epic','pair','direction','size','stopDistance','limitDistance','status','dealId','reason','level','signal'];
-const POS_COLS = ['dealId','dealReference','epic','pair','direction','size','openLevel','stopLevel','limitLevel','status','source','openedAt','closedAt','closeLevel','closeReason','pnlGbp','pnlEstimated'];
-const NUMERIC = ['size','stopDistance','limitDistance','level','openLevel','stopLevel','limitLevel','closeLevel','pnlGbp'];
+const ORDER_COLS = ['dealReference','epic','pair','direction','size','stopDistance','limitDistance','status','dealId','reason','level','signal','quoteLevel','spreadPips','slippagePips','context'];
+const POS_COLS = ['dealId','dealReference','epic','pair','direction','size','openLevel','stopLevel','limitLevel','status','source','openedAt','closedAt','closeLevel','closeReason','pnlGbp','pnlEstimated','pnlEstimateGbp'];
+const NUMERIC = ['size','stopDistance','limitDistance','level','openLevel','stopLevel','limitLevel','closeLevel','pnlGbp','quoteLevel','spreadPips','slippagePips','pnlEstimateGbp'];
 const snake = (s) => s.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
 const camel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const out = (r) => r && Object.fromEntries(Object.entries(r).map(([k, v]) => { const c = camel(k); return [c, v !== null && NUMERIC.includes(c) ? Number(v) : v]; }));
 
 class MemStore {
   async migrate() {}
+  async listClosed(limit = 1000) { return [...this.positions.values()].filter((p) => p.status === 'CLOSED').slice(-limit).map((p) => ({ ...p })); }
+  async listAllOrders(limit = 2000) { return this.orders.slice(-limit).map((o) => ({ ...o })); }
+  async listEstimatedClosed(limit = 50) { return [...this.positions.values()].filter((p) => p.status === 'CLOSED' && p.pnlEstimated !== false).slice(-limit).map((p) => ({ ...p })); }
   async recent() { return { orders: this.orders.slice(-50).reverse(), closed: [...this.positions.values()].filter((p) => p.status === 'CLOSED').slice(-50).reverse() }; }
   constructor() { this.orders = []; this.positions = new Map(); this.state = new Map(); this.auditLog = []; }
   async insertOrder(o) {
@@ -32,16 +35,23 @@ class MemStore {
 
 class PgStore {
   constructor(pool) { this.db = pool; }
-  async migrate() { await this.db.query(require('fs').readFileSync(require('path').join(__dirname, '../../migrations/001_execution.sql'), 'utf8')); }
+  async migrate() {
+    const fs = require('fs'), path = require('path'), dir = path.join(__dirname, '../../migrations');
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) await this.db.query(fs.readFileSync(path.join(dir, f), 'utf8'));
+  }
+  async listClosed(limit = 1000) { return (await this.db.query("SELECT * FROM ig_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT $1", [limit])).rows.map(out); }
+  async listAllOrders(limit = 2000) { return (await this.db.query('SELECT * FROM ig_orders ORDER BY id DESC LIMIT $1', [limit])).rows.map(out); }
+  async listEstimatedClosed(limit = 50) { return (await this.db.query("SELECT * FROM ig_positions WHERE status='CLOSED' AND pnl_estimated IS NOT FALSE AND closed_at > now() - interval '30 days' ORDER BY closed_at DESC LIMIT $1", [limit])).rows.map(out); }
   async recent() {
     return { orders: (await this.db.query('SELECT * FROM ig_orders ORDER BY id DESC LIMIT 50')).rows.map(out),
       closed: (await this.db.query("SELECT * FROM ig_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT 50")).rows.map(out) };
   }
   async insertOrder(o) {
     const r = await this.db.query(
-      `INSERT INTO ig_orders (idem_key,deal_reference,epic,pair,direction,size,stop_distance,limit_distance,status,signal)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING *`,
-      [o.idemKey, o.dealReference, o.epic, o.pair, o.direction, o.size, o.stopDistance, o.limitDistance, o.status, JSON.stringify(o.signal || null)]);
+      `INSERT INTO ig_orders (idem_key,deal_reference,epic,pair,direction,size,stop_distance,limit_distance,status,signal,quote_level,spread_pips,context)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING RETURNING *`,
+      [o.idemKey, o.dealReference, o.epic, o.pair, o.direction, o.size, o.stopDistance, o.limitDistance, o.status, JSON.stringify(o.signal || null),
+        o.quoteLevel ?? null, o.spreadPips ?? null, JSON.stringify(o.context ?? null)]);
     if (r.rows[0]) return { inserted: true, row: out(r.rows[0]) };
     const ex = await this.db.query('SELECT * FROM ig_orders WHERE idem_key=$1 OR deal_reference=$2', [o.idemKey, o.dealReference]);
     return { inserted: false, row: out(ex.rows[0]) };
@@ -50,7 +60,7 @@ class PgStore {
   async updateOrder(ref, patch) {
     const keys = Object.keys(patch).filter((k) => ORDER_COLS.includes(k));
     const sets = keys.map((k, i) => `${snake(k)}=$${i + 2}`).concat('updated_at=now()');
-    await this.db.query(`UPDATE ig_orders SET ${sets.join(',')} WHERE deal_reference=$1`, [ref, ...keys.map((k) => (k === 'signal' ? JSON.stringify(patch[k]) : patch[k]))]);
+    await this.db.query(`UPDATE ig_orders SET ${sets.join(',')} WHERE deal_reference=$1`, [ref, ...keys.map((k) => (k === 'signal' || k === 'context' ? JSON.stringify(patch[k]) : patch[k]))]);
   }
   async listOrders(statuses) { return (await this.db.query('SELECT * FROM ig_orders WHERE status = ANY($1)', [statuses])).rows.map(out); }
   // UPDATE first: Postgres checks NOT NULL on an INSERT's proposed row before conflict handling,

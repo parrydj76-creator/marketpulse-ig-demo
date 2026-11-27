@@ -10,7 +10,16 @@ input{width:100%;padding:10px;box-sizing:border-box;border-radius:8px;border:1px
 <button class="k" onclick="if(confirm('Close ALL positions and stop trading?'))go('POST','kill',{closeAll:true,reason:'dashboard'})">KILL SWITCH</button>
 <button class="r" onclick="if(confirm('Resume automated trading?'))go('POST','resume')">Resume</button>
 <button class="n" onclick="go('GET','history')">History</button><button class="n" onclick="go('POST','reconcile')">Reconcile</button>
+<button class="n" onclick="location.href='/ig-report.html'">Results report</button>
 <pre id="o">Enter token, press Refresh.</pre>
+<h3>Alerts on this phone</h3>
+<p style="font-size:13px;color:#aaa">iPhone: first add this site to your Home Screen, then open it from there. Needs the push pairing token.</p>
+<input id="pairing" type="password" placeholder="PUSH_PAIRING_TOKEN">
+<button class="n" id="pushon">Enable alerts on this device</button>
+<button class="n" onclick="go('POST','alerts/test')">Send test IG alert</button>
+<button class="n" onclick="go('GET','alerts/status')">Alert status</button>
+<p id="pushstatus" style="font-size:13px"></p>
+<script src="/push-ui.js"></script>
 <script>
 async function go(m,p,b){const o=document.getElementById('o'),s=document.getElementById('s');try{const r=await fetch('/api/admin/ig-exec/'+p,{method:m,headers:{'x-admin-token':document.getElementById('t').value,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
 const ct=r.headers.get('content-type')||'';
