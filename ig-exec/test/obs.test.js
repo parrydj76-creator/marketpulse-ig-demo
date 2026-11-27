@@ -171,3 +171,18 @@ test('adapter passes indicator context through, with non-finite values nulled', 
   const s = toSignal({ epic: CFD, bar: 'b', direction: 'LONG', score: 80, rsi: 58, ema9: 1.1, ema21: NaN, entry: 1.1, spreadPips: 0.9, risk: 24, at: 123 }, { IG_EXEC_SIZE: '1' });
   assert.deepEqual([s.context.score, s.context.rsi, s.context.ema21, s.context.paperSpreadPips, s.context.signalAt], [80, 58, null, 0.9, 123]);
 });
+
+test('real IG transaction format (captured from the live DEMO account): signed size, "converted at" name', () => {
+  const rows = [
+    { dateUtc: '2026-11-27T09:37:03', openDateUtc: '2026-11-27T09:37:02', instrumentName: 'EUR/USD converted at 0.767980690771392', profitAndLoss: '£-7.68', transactionType: 'DEAL', openLevel: '1.09616', closeLevel: '1.09626', size: '-1', currency: '£' },
+    { dateUtc: '2026-11-27T09:37:00', openDateUtc: '2026-11-27T09:36:57', instrumentName: 'EUR/USD converted at 0.767980690771392', profitAndLoss: '£-5.38', transactionType: 'DEAL', openLevel: '1.09626', closeLevel: '1.09619', size: '+1', currency: '£' },
+  ];
+  const buy = { pair: 'EURUSD', direction: 'BUY', size: 1, openLevel: 1.09626, openedAt: '2026-11-27T09:36:58.522Z' };
+  const sell = { pair: 'EURUSD', direction: 'SELL', size: 1, openLevel: 1.09616, openedAt: '2026-11-27T09:37:03.046Z' };
+  const used = new Set();
+  assert.equal(matchTx(buy, rows, used), rows[1]); used.add(rows[1]);
+  assert.equal(matchTx(sell, rows, used), rows[0]);
+  assert.equal(parseMoney(rows[1].profitAndLoss), -5.38);
+  assert.equal(matchTx({ ...buy, direction: 'SELL' }, [rows[1]], new Set()), null);       // sign contradicts direction -> never matched
+  assert.equal(matchTx({ ...sell, openLevel: 1.09626 }, [rows[0]], new Set()), null);     // wrong open level
+});

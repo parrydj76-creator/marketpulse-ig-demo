@@ -7,8 +7,8 @@ function createMockIg({ accountId = 'DEMO1' } = {}) {
   s.book = (dealId, closeLevel) => {
     const p = s.positions.get(dealId), m = s.meta.get(dealId), pos = p.position, buy = pos.direction === 'BUY';
     const pips = ((closeLevel - pos.level) / 1e-4) * (buy ? 1 : -1), pnl = pips * pos.size * s.pipValue, pair = p.market.epic.split('.')[2];
-    s.transactions.push({ dateUtc: naive(Date.now()), openDateUtc: naive(m.openedMs), instrumentName: pair.slice(0, 3) + '/' + pair.slice(3), period: '-', transactionType: 'DEAL',
-      profitAndLoss: '£' + pnl.toFixed(2), reference: 'R' + dealId.slice(-6), openLevel: String(pos.level), closeLevel: String(closeLevel), size: String(pos.size), currency: '£' });
+    s.transactions.push({ dateUtc: naive(Date.now()), openDateUtc: naive(m.openedMs), instrumentName: pair.slice(0, 3) + '/' + pair.slice(3) + ' converted at 0.76798', period: '-', transactionType: 'DEAL',
+      profitAndLoss: '£' + pnl.toFixed(2), reference: 'R' + dealId.slice(-6), openLevel: String(pos.level), closeLevel: String(closeLevel), size: (buy ? '+' : '-') + pos.size, currency: '£' });
   };
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', (c) => (raw += c));
